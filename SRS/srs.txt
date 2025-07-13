@@ -1,0 +1,428 @@
+# AURA: Autonomous UI Reader and Assistant
+## Software Requirements Specification (SRS)
+
+**Version:** 1.0
+**Date:** July 12, 2025
+**Document Status:** Draft
+
+---
+
+## 1. INTRODUCTION
+
+### 1.1 Purpose
+This document specifies the software requirements for AURA (Autonomous UI Reader and Assistant), an Android application designed to enable complete voice-controlled interaction with mobile devices for users with visual impairments, motor impairments, and general users requiring hands-free operation.
+
+### 1.2 Scope
+AURA will provide:
+- Complete voice-controlled Android device interaction
+- Real-time UI element recognition and manipulation
+- Multi-modal accessibility support (speech, vision, touch simulation)
+- Seamless integration with Android Accessibility Services
+- Cloud-based AI processing for natural language understanding and computer vision
+
+### 1.3 Definitions and Acronyms
+- **AURA**: Autonomous UI Reader and Assistant
+- **STT**: Speech-to-Text
+- **TTS**: Text-to-Speech
+- **LLM**: Large Language Model
+- **VLM**: Vision Language Model
+- **UI**: User Interface
+- **A11y**: Accessibility Services
+- **API**: Application Programming Interface
+
+### 1.4 References
+- Android Accessibility Services Documentation
+- Groq Cloud API Documentation
+- Android MediaProjection API
+- WCAG 2.1 Accessibility Guidelines
+
+---
+
+## 2. OVERALL DESCRIPTION
+
+### 2.1 Product Perspective
+AURA is a standalone Android application that acts as an accessibility layer over the entire Android operating system. It integrates with:
+- Android Accessibility Services Framework
+- Device microphone and speaker
+- Screen capture capabilities
+- Cloud-based AI services (Groq)
+- System-level gesture simulation
+
+### 2.2 Product Functions
+**Primary Functions:**
+- Voice command interpretation and execution
+- Dynamic UI element detection and interaction
+- Real-time screen analysis and navigation
+- Contextual user feedback and guidance
+- Cross-application automation
+
+**Secondary Functions:**
+- User preference management
+- Command history and learning
+- Accessibility reporting and analytics
+- Offline mode for basic commands
+
+### 2.3 User Classes and Characteristics
+**Primary Users:**
+- Individuals with visual impairments (blind/low vision)
+- Users with motor impairments (limited mobility)
+- General users requiring hands-free interaction
+
+**Technical Expertise:** Minimal to moderate Android device usage experience
+**Accessibility Needs:** High priority for audio feedback and voice control
+
+### 2.4 Operating Environment
+- **Platform**: Android 8.0 (API Level 26) and above
+- **Hardware**: ARM64 processor, 4GB+ RAM, microphone, speaker
+- **Network**: Internet connectivity for cloud AI services
+- **Permissions**: Accessibility Service, Microphone, Screen Capture, System Alert Window
+
+---
+
+## 3. SYSTEM FEATURES
+
+### 3.1 Voice Input Processing
+**Description:** Capture and process user voice commands
+**Priority:** High
+
+**Functional Requirements:**
+- **FR-3.1.1**: System shall capture audio input via device microphone
+- **FR-3.1.2**: System shall process audio using Whisper-large-v3-turbo STT model
+- **FR-3.1.3**: System shall handle multiple languages and accents
+- **FR-3.1.4**: System shall provide real-time voice activity detection
+- **FR-3.1.5**: System shall support wake word activation ("Hey AURA")
+
+**Input:** Audio stream from device microphone
+**Output:** Transcribed text command
+**Processing:** Cloud-based STT via Groq API
+
+### 3.2 Intent Recognition and Processing
+**Description:** Understand user intent from transcribed commands
+**Priority:** High
+
+**Functional Requirements:**
+- **FR-3.2.1**: System shall analyze command text using LLaMA-3.3-70b-versatile
+- **FR-3.2.2**: System shall identify target application and action
+- **FR-3.2.3**: System shall extract parameters for UI interactions
+- **FR-3.2.4**: System shall handle ambiguous commands with clarification
+- **FR-3.2.5**: System shall maintain conversation context
+
+**Input:** Transcribed text command
+**Output:** Structured intent with action parameters
+**Processing:** Cloud-based LLM via Groq API
+
+### 3.3 UI Element Detection and Analysis
+**Description:** Identify and locate interactive UI elements
+**Priority:** High
+
+**Functional Requirements:**
+- **FR-3.3.1**: System shall access UI hierarchy via Accessibility Services
+- **FR-3.3.2**: System shall capture screenshots using MediaProjection API
+- **FR-3.3.3**: System shall analyze screenshots using LLaMA-4-Maverick-17b VLM
+- **FR-3.3.4**: System shall extract UI element coordinates and properties
+- **FR-3.3.5**: System shall handle dynamic and image-based UI elements
+- **FR-3.3.6**: System shall create unified UI representation from multiple sources
+
+**Input:** Accessibility node tree + screenshot
+**Output:** Structured UI element map with coordinates
+**Processing:** Hybrid local accessibility parsing + cloud VLM analysis
+
+### 3.4 Action Execution and Simulation
+**Description:** Execute user commands through UI interaction
+**Priority:** High
+
+**Functional Requirements:**
+- **FR-3.4.1**: System shall simulate touch gestures via Accessibility API
+- **FR-3.4.2**: System shall perform text input using virtual keyboard
+- **FR-3.4.3**: System shall execute swipe and scroll gestures
+- **FR-3.4.4**: System shall handle multi-step workflows
+- **FR-3.4.5**: System shall provide action confirmation and error handling
+- **FR-3.4.6**: System shall support custom gesture macros
+
+**Input:** Intent + UI element coordinates
+**Output:** Executed system gestures
+**Processing:** Local gesture simulation via Accessibility Services
+
+### 3.5 User Feedback and Guidance
+**Description:** Provide audio feedback and guidance to users
+**Priority:** High
+
+**Functional Requirements:**
+- **FR-3.5.1**: System shall provide TTS feedback using PlayAI-TTS
+- **FR-3.5.2**: System shall announce UI elements and actions
+- **FR-3.5.3**: System shall provide step-by-step navigation guidance
+- **FR-3.5.4**: System shall offer contextual help and suggestions
+- **FR-3.5.5**: System shall support multiple TTS voices and languages
+
+**Input:** System events and user actions
+**Output:** Synthesized speech audio
+**Processing:** Cloud-based TTS via Groq API
+
+### 3.6 Application State Management
+**Description:** Maintain application context and user sessions
+**Priority:** Medium
+
+**Functional Requirements:**
+- **FR-3.6.1**: System shall track current application and screen state
+- **FR-3.6.2**: System shall maintain command history and context
+- **FR-3.6.3**: System shall handle application transitions and interruptions
+- **FR-3.6.4**: System shall provide session persistence
+- **FR-3.6.5**: System shall support multiple concurrent workflows
+
+---
+
+## 4. EXTERNAL INTERFACE REQUIREMENTS
+
+### 4.1 User Interfaces
+**Primary Interface:** Voice-driven interaction
+- No traditional visual UI required for primary functions
+- Optional visual feedback for hearing-impaired users
+- Settings and configuration screens with accessibility support
+
+### 4.2 Hardware Interfaces
+- **Microphone**: Primary input device for voice commands
+- **Speaker/Headphones**: Audio output for TTS feedback
+- **Touchscreen**: Backup input method for configuration
+- **Camera**: Optional for enhanced visual context
+
+### 4.3 Software Interfaces
+**Android System APIs:**
+- AccessibilityService for UI interaction
+- MediaProjection for screen capture
+- AudioManager for audio I/O
+- DevicePolicyManager for system permissions
+
+**Cloud Services:**
+- Groq API for AI model inference
+- HTTP/REST for API communication
+- WebSocket for real-time streaming (if supported)
+
+### 4.4 Communication Interfaces
+- **Network Protocol**: HTTPS/TLS 1.3
+- **Data Format**: JSON for API communication
+- **Audio Format**: WAV/PCM for STT, MP3/AAC for TTS
+- **Image Format**: PNG/JPEG for screenshot analysis
+
+---
+
+## 5. SYSTEM REQUIREMENTS
+
+### 5.1 Performance Requirements
+- **Response Time**: <2 seconds for voice command processing
+- **Throughput**: Support 100+ commands per session
+- **Availability**: 99.5% uptime during active usage
+- **Scalability**: Handle concurrent multi-app workflows
+
+### 5.2 Security Requirements
+- **Authentication**: Device-level authentication required
+- **Data Privacy**: Voice data encrypted in transit and at rest
+- **Permissions**: Minimal required permissions with user consent
+- **API Security**: Secure API key management and rotation
+
+### 5.3 Software Quality Attributes
+**Reliability:**
+- 99.9% successful command execution rate
+- Graceful degradation when services unavailable
+- Automatic error recovery and retry mechanisms
+
+**Usability:**
+- Intuitive voice command syntax
+- Clear audio feedback and error messages
+- Customizable interaction preferences
+
+**Maintainability:**
+- Modular architecture for easy updates
+- Comprehensive logging and diagnostics
+- Automated testing framework
+
+---
+
+## 6. TECHNICAL ARCHITECTURE
+
+### 6.1 Technology Stack
+**Frontend:**
+- **Platform**: Native Android (Kotlin/Java)
+- **UI Framework**: Android Jetpack Compose (for settings)
+- **Architecture**: MVVM with Repository pattern
+
+**Backend Services:**
+- **STT Service**: Whisper-large-v3-turbo via Groq
+- **LLM Service**: LLaMA-3.3-70b-versatile via Groq
+- **VLM Service**: LLaMA-4-Maverick-17b-128e via Groq
+- **TTS Service**: PlayAI-TTS via Groq
+
+**Core Components:**
+- **Audio Processing**: Android MediaRecorder + AudioManager
+- **Accessibility Engine**: Android AccessibilityService
+- **Computer Vision**: MediaProjection + Bitmap processing
+- **Gesture Simulation**: AccessibilityService gesture APIs
+
+### 6.2 System Architecture
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        AURA APPLICATION                      │
+├─────────────────────────────────────────────────────────────┤
+│  Voice Input Handler │ Intent Processor │ Action Executor   │
+│  ├─ STT Service      │ ├─ LLM Service   │ ├─ Gesture Engine  │
+│  ├─ Wake Word Det.   │ ├─ Context Mgr   │ ├─ Text Input      │
+│  └─ Audio Manager    │ └─ Command Queue │ └─ UI Navigator    │
+├─────────────────────────────────────────────────────────────┤
+│  UI Analysis Engine  │ Feedback System  │ State Management  │
+│  ├─ A11y Service     │ ├─ TTS Service   │ ├─ Session Store   │
+│  ├─ Screen Capture   │ ├─ Audio Output  │ ├─ Config Manager  │
+│  └─ VLM Service      │ └─ Event Logger  │ └─ Cache Layer     │
+├─────────────────────────────────────────────────────────────┤
+│                    ANDROID SYSTEM APIS                      │
+│  AccessibilityService │ MediaProjection │ AudioManager     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 6.3 Data Flow Architecture
+1. **Voice Input** → AudioManager → STT Service → Text Command
+2. **Text Command** → LLM Service → Structured Intent
+3. **Intent** → UI Analysis → A11y Service + VLM → UI Map
+4. **UI Map + Intent** → Action Executor → Gesture Simulation
+5. **Action Results** → TTS Service → Audio Feedback
+
+---
+
+## 7. IMPLEMENTATION REQUIREMENTS
+
+### 7.1 Development Environment
+- **IDE**: Android Studio with Kotlin support
+- **Build System**: Gradle with Android Gradle Plugin
+- **Version Control**: Git with conventional commits
+- **Testing**: JUnit 5 + Espresso + Mockk
+- **CI/CD**: GitHub Actions for automated testing
+
+### 7.2 Code Structure
+```
+src/
+├── main/
+│   ├── java/com/aura/
+│   │   ├── accessibility/     # Accessibility service components
+│   │   ├── ai/               # AI service integrations
+│   │   ├── audio/            # Audio processing
+│   │   ├── core/             # Core business logic
+│   │   ├── gesture/          # Gesture simulation
+│   │   ├── ui/               # UI components
+│   │   └── utils/            # Utility classes
+│   └── res/                  # Resources
+├── test/                     # Unit tests
+└── androidTest/              # Integration tests
+```
+
+### 7.3 Third-Party Dependencies
+- **Networking**: OkHttp + Retrofit for API communication
+- **JSON Processing**: Gson for serialization
+- **Audio Processing**: Android MediaRecorder APIs
+- **Logging**: Timber for structured logging
+- **Dependency Injection**: Hilt for DI container
+
+---
+
+## 8. DEPLOYMENT AND MAINTENANCE
+
+### 8.1 Deployment Strategy
+- **Distribution**: Google Play Store (primary) + APK sideloading
+- **Updates**: Over-the-air updates via Play Store
+- **Rollback**: Staged rollout with automatic rollback on errors
+- **Monitoring**: Crash reporting via Firebase Crashlytics
+
+### 8.2 Maintenance Requirements
+- **Bug Fixes**: Monthly patch releases
+- **Feature Updates**: Quarterly feature releases
+- **Security Updates**: As needed for vulnerabilities
+- **API Updates**: Following Groq API versioning
+
+---
+
+## 9. TESTING REQUIREMENTS
+
+### 9.1 Testing Strategy
+**Unit Testing:**
+- Business logic components (>90% coverage)
+- AI service integrations
+- Audio processing modules
+
+**Integration Testing:**
+- Accessibility service interactions
+- End-to-end command workflows
+- API communication flows
+
+**User Acceptance Testing:**
+- Voice command accuracy testing
+- Accessibility compliance validation
+- Performance benchmarking
+
+### 9.2 Test Data Requirements
+- Sample voice commands in multiple languages
+- Mock UI screenshots for VLM testing
+- Accessibility node tree samples
+- Performance test scenarios
+
+---
+
+## 10. RISK ANALYSIS
+
+### 10.1 Technical Risks
+- **High**: Groq API availability and rate limiting
+- **Medium**: Android OS compatibility across versions
+- **Medium**: Accessibility service permission challenges
+- **Low**: Device hardware compatibility
+
+### 10.2 Mitigation Strategies
+- **API Redundancy**: Implement fallback AI providers
+- **Offline Mode**: Cache common responses locally
+- **Permission Handling**: Clear user education and onboarding
+- **Device Testing**: Comprehensive device compatibility matrix
+
+---
+
+## 11. SUCCESS METRICS
+
+### 11.1 Performance Metrics
+- Command recognition accuracy: >95%
+- Average response time: <2 seconds
+- User task completion rate: >90%
+- Application crash rate: <0.1%
+
+### 11.2 User Experience Metrics
+- User retention rate: >80% after 30 days
+- Average session duration: >15 minutes
+- User satisfaction score: >4.5/5
+- Accessibility compliance: WCAG 2.1 AA level
+
+---
+
+## 12. APPENDICES
+
+### Appendix A: Android Permissions Required
+```xml
+<uses-permission android:name="android.permission.RECORD_AUDIO" />
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE" />
+```
+
+### Appendix B: Groq API Endpoints
+- STT: `https://api.groq.com/openai/v1/audio/transcriptions`
+- LLM: `https://api.groq.com/openai/v1/chat/completions`
+- VLM: `https://api.groq.com/openai/v1/chat/completions`
+- TTS: `https://api.groq.com/v1/audio/speech`
+
+### Appendix C: Sample Voice Commands
+- "Open Gmail and compose a new email"
+- "Navigate to Settings and enable Dark mode"
+- "Read the latest news from BBC app"
+- "Call John from contacts"
+- "Set an alarm for 7 AM tomorrow"
+
+---
+
+**Document Control:**
+- **Created by**: Development Team
+- **Review Status**: Under Review
+- **Next Review Date**: August 12, 2025
+- **Approval**: Pending Stakeholder Review
