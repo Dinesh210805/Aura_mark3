@@ -24,13 +24,15 @@ import android.util.Log
 // See Groq API docs for required fields
 // Example: { "model": "playai-tts-1", "input": "Hello world", "voice": "nova" }
 data class PlayAITtsRequest(
-    val model: String = "playai-tts-1",
+    val model: String = "playai-tts",
     val input: String,
-    val voice: String = "nova"
+    val voice: String = "nova",
+    val response_format: String = "mp3",
+    val speed: Float = 1.2f // Add speed parameter, default 1.2
 )
 
 interface PlayAITtsApi {
-    @POST("/v1/audio/speech")
+    @POST("/openai/v1/audio/speech")
     fun synthesizeSpeech(
         @Header("Authorization") authHeader: String,
         @Body request: PlayAITtsRequest
@@ -61,8 +63,9 @@ fun playAudioFromResponse(
 ) {
     val TAG = "PlayAI_TTS"
     try {
+        Log.i(TAG, "Starting PlayAI TTS audio processing")
         // Save to temp file
-        val tempFile = File.createTempFile("playai_tts", ".mp3", context.cacheDir)
+        val tempFile = File.createTempFile("playai_tts", ".mp3", context.cacheDir) // Ensure .mp3 extension
         FileOutputStream(tempFile).use { fos ->
             fos.write(responseBody.bytes())
         }
@@ -70,11 +73,19 @@ fun playAudioFromResponse(
         val mainHandler = Handler(Looper.getMainLooper())
         mainHandler.post {
             try {
+                Log.i(TAG, "Setting up MediaPlayer on main thread")
                 val mediaPlayer = MediaPlayer().apply {
                     setDataSource(tempFile.absolutePath)
                     setOnPreparedListener {
                         Log.i(TAG, "MediaPlayer prepared, starting playback.")
-                        start()
+                        try {
+                            start()
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Exception starting MediaPlayer", e)
+                            onError?.invoke(e)
+                            tempFile.delete()
+                            release()
+                        }
                     }
                     setOnCompletionListener {
                         Log.i(TAG, "Playback complete.")

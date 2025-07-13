@@ -28,6 +28,8 @@ import retrofit2.Callback
 import retrofit2.Response
 import android.speech.tts.TextToSpeech
 import java.util.*
+import android.os.Handler
+import android.os.Looper
 
 class AudioRecorderService : Service() {
 
@@ -50,22 +52,13 @@ class AudioRecorderService : Service() {
     private var tts: TextToSpeech? = null
 
     private var isTtsInitialized = false
-
+    private val ttsQueue = mutableListOf<String>()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-
-        tts = TextToSpeech(this) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.US
-                isTtsInitialized = true
-                Log.i("AURA_TTS", "TTS initialized successfully.")
-            } else {
-                Log.e("AURA_TTS", "TTS Initialization failed")
-            }
-        }
-
+        // Remove TTS initialization
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -89,8 +82,7 @@ class AudioRecorderService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         stopRecording()
-        tts?.stop()
-        tts?.shutdown()
+        // Remove TTS shutdown
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -284,35 +276,30 @@ class AudioRecorderService : Service() {
                 if (response.isSuccessful) {
                     val transcription = response.body()?.text ?: ""
                     Log.i("AURA_STT", "Transcription: $transcription")
-                    if (transcription.isNotBlank()) {
-                        speak(transcription)
-                    } else {
-                        speak("Sorry, I couldn’t hear anything.")
-                    }
-
+                    // Only broadcast, do not speak
                     val intent = Intent(ACTION_TRANSCRIPTION).apply {
                         putExtra(EXTRA_TRANSCRIPTION, transcription)
                     }
                     sendBroadcast(intent)
                 } else {
                     Log.e("AURA_STT", "Transcription failed: ${response.code()} ${response.message()}")
-                    speak("Sorry, speech recognition failed with code ${response.code()}.")
+                    val intent = Intent(ACTION_TRANSCRIPTION).apply {
+                        putExtra(EXTRA_TRANSCRIPTION, "Sorry, speech recognition failed with code ${response.code()}.")
+                    }
+                    sendBroadcast(intent)
                 }
             }
 
             override fun onFailure(call: Call<SttResponse>, t: Throwable) {
                 Log.e("AURA_STT", "Transcription error", t)
-                speak("Failed to connect to server. Please try again.")
+                val intent = Intent(ACTION_TRANSCRIPTION).apply {
+                    putExtra(EXTRA_TRANSCRIPTION, "Failed to connect to server. Please try again.")
+                }
+                sendBroadcast(intent)
             }
         })
     }
 
-    private fun speak(message: String) {
-        if (isTtsInitialized) {
-            tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, null)
-        } else {
-            Log.w("AURA_TTS", "speak() called before TTS was initialized: \"$message\"")
-        }
-    }
+    // Remove speak() and speakInternal()
 
 }
