@@ -1,0 +1,117 @@
+Production Models
+Note: Production models are intended for use in your production environments. They meet or exceed our high standards for speed, quality, and reliability. Read more here.
+
+MODEL ID DEVELOPER CONTEXT WINDOW (TOKENS) MAX COMPLETION TOKENS MAX FILE SIZE DETAILS
+distil-whisper-large-v3-en
+Hugging Face
+
+-
+- 100 MB
+  Details
+  gemma2-9b-it
+  Google
+  8,192
+  8,192
+- Details
+  llama-3.1-8b-instant
+  Meta
+  131,072
+  131,072
+- Details
+  llama-3.3-70b-versatile
+  Meta
+  131,072
+  32,768
+- Details
+  meta-llama/llama-guard-4-12b
+  Meta
+  131,072
+  1,024
+  20 MB
+  Details
+  whisper-large-v3
+  OpenAI
+-
+- 100 MB
+  Details
+  whisper-large-v3-turbo
+  OpenAI
+-
+- 100 MB
+  Details
+
+Preview Models
+Note: Preview models are intended for evaluation purposes only and should not be used in production environments as they may be discontinued at short notice. Read more about deprecations here.
+
+MODEL ID DEVELOPER CONTEXT WINDOW (TOKENS) MAX COMPLETION TOKENS MAX FILE SIZE DETAILS
+deepseek-r1-distill-llama-70b
+DeepSeek / Meta
+131,072
+131,072
+
+- Details
+  meta-llama/llama-4-maverick-17b-128e-instruct
+  Meta
+  131,072
+  8,192
+  20 MB
+  Details
+  meta-llama/llama-4-scout-17b-16e-instruct
+  Meta
+  131,072
+  8,192
+  20 MB
+  Details
+  meta-llama/llama-prompt-guard-2-22m
+  Meta
+  512
+  512
+- Details
+  meta-llama/llama-prompt-guard-2-86m
+  Meta
+  512
+  512
+- Details
+  mistral-saba-24b
+  Mistral AI
+  32,768
+  32,768
+- Details
+  playai-tts
+  PlayAI
+  8,192
+  8,192
+- Details
+  playai-tts-arabic
+  PlayAI
+  8,192
+  8,192
+- Details
+  qwen-qwq-32b
+  Alibaba Cloud
+  131,072
+  131,072
+- Details
+  qwen/qwen3-32b
+  Alibaba Cloud
+  131,072
+  40,960
+- Details
+
+Preview Systems
+Systems are a collection of models and tools that work together to answer a user query.
+
+Note: Preview systems are intended for evaluation purposes only and should not be used in production environments as they may be discontinued at short notice. Read more about deprecations here.
+
+MODEL ID DEVELOPER CONTEXT WINDOW (TOKENS) MAX COMPLETION TOKENS MAX FILE SIZE DETAILS
+compound-beta
+Groq
+131,072
+8,192
+
+- Details
+  compound-beta-mini
+  Groq
+  131,072
+  8,192
+- Details

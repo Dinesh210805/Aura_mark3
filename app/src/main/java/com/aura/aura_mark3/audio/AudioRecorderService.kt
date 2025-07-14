@@ -168,15 +168,22 @@ class AudioRecorderService : Service() {
     }
 
     private fun loadApiKey(): String {
+        // Try environment variable first
+        val envKey = System.getenv("GROQ_API_KEY")
+        if (!envKey.isNullOrBlank()) {
+            return "Bearer $envKey"
+        }
+        // Fallback to properties file
         return try {
             val properties = java.util.Properties()
             assets.open("api_keys.properties").use {
                 properties.load(it)
             }
-            "Bearer ${properties.getProperty("groq_api_key", "")}"
+            val fileKey = properties.getProperty("groq_api_key", "")
+            if (fileKey.isNotBlank()) "Bearer $fileKey" else ""
         } catch (e: Exception) {
             Log.e("AURA_API", "Failed to load API key", e)
-            "Bearer "
+            ""
         }
     }
 

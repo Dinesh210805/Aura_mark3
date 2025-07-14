@@ -35,6 +35,8 @@ class AuraAccessibilityService : AccessibilityService() {
 
         const val ACTION_PERFORM_SCROLL_AT_COORDS = "com.aura.aura_mark3.PERFORM_SCROLL_AT_COORDS"
         const val ACTION_PERFORM_INPUT_AT_COORDS = "com.aura.aura_mark3.PERFORM_INPUT_AT_COORDS"
+        const val ACTION_FOREGROUND_PACKAGE = "com.aura.aura_mark3.FOREGROUND_PACKAGE"
+        const val EXTRA_FOREGROUND_PACKAGE = "foreground_package"
     }
 
     private fun sendActionResult(success: Boolean, message: String) {
@@ -121,6 +123,8 @@ class AuraAccessibilityService : AccessibilityService() {
         }
     }
 
+    private var lastForegroundPackage: String? = null
+
     @SuppressLint("ObsoleteSdkInt")
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -156,6 +160,16 @@ class AuraAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val root = rootInActiveWindow
+        // Broadcast foreground package name if changed
+        event?.packageName?.toString()?.let { pkg ->
+            if (pkg != lastForegroundPackage) {
+                lastForegroundPackage = pkg
+                val intent = Intent(ACTION_FOREGROUND_PACKAGE).apply {
+                    putExtra(EXTRA_FOREGROUND_PACKAGE, pkg)
+                }
+                sendBroadcast(intent)
+            }
+        }
         if (root != null) {
             logNodeTree(root)
             val target = findNodeByTextOrDesc(root, "OK")

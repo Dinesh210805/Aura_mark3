@@ -1,0 +1,843 @@
+Text Generation
+
+Generating text with Groq's Chat Completions API enables you to have natural, conversational interactions with Groq's large language models. It processes a series of messages and generates human-like responses that can be used for various applications including conversational agents, content generation, task automation, and generating structured data outputs like JSON for your applications.
+
+On This Page
+Chat Completions
+Basic Chat Completion
+Streaming Chat Completion
+Using Stop Sequences
+JSON Mode
+JSON Mode with Schema Validation
+Chat Completions
+Chat completions allow your applications to have dynamic interactions with Groq's models. You can send messages that include user inputs and system instructions, and receive responses that match the conversational context.
+
+Chat models can handle both multi-turn discussions (conversations with multiple back-and-forth exchanges) and single-turn tasks where you need just one response.
+
+For details about all available parameters, visit the API reference page.
+
+Getting Started with Groq SDK
+To start using Groq's Chat Completions API, you'll need to install the Groq SDK and set up your API key.
+
+Python
+JavaScript
+shell
+
+pip install groq
+Performing a Basic Chat Completion
+The simplest way to use the Chat Completions API is to send a list of messages and receive a single response. Messages are provided in chronological order, with each message containing a role ("system", "user", or "assistant") and content.
+
+Python
+
+from groq import Groq
+
+client = Groq()
+
+chat_completion = client.chat.completions.create(
+messages=[
+# Set an optional system message. This sets the behavior of the
+# assistant and can be used to provide specific instructions for
+# how it should behave throughout the conversation.
+{
+"role": "system",
+"content": "You are a helpful assistant."
+},
+# Set a user message for the assistant to respond to.
+{
+"role": "user",
+"content": "Explain the importance of fast language models",
+}
+],
+
+    # The language model which will generate the completion.
+    model="llama-3.3-70b-versatile"
+
+)
+
+# Print the completion returned by the LLM.
+
+print(chat_completion.choices[0].message.content)
+Streaming a Chat Completion
+For a more responsive user experience, you can stream the model's response in real-time. This allows your application to display the response as it's being generated, rather than waiting for the complete response.
+
+To enable streaming, set the parameter stream=True. The completion function will then return an iterator of completion deltas rather than a single, full completion.
+
+Python
+
+from groq import Groq
+
+client = Groq()
+
+stream = client.chat.completions.create( # # Required parameters #
+messages=[
+# Set an optional system message. This sets the behavior of the
+# assistant and can be used to provide specific instructions for
+# how it should behave throughout the conversation.
+{
+"role": "system",
+"content": "You are a helpful assistant."
+},
+# Set a user message for the assistant to respond to.
+{
+"role": "user",
+"content": "Explain the importance of fast language models",
+}
+],
+
+    # The language model which will generate the completion.
+    model="llama-3.3-70b-versatile",
+
+    #
+    # Optional parameters
+    #
+
+    # Controls randomness: lowering results in less random completions.
+    # As the temperature approaches zero, the model will become deterministic
+    # and repetitive.
+    temperature=0.5,
+
+    # The maximum number of tokens to generate. Requests can use up to
+    # 2048 tokens shared between prompt and completion.
+    max_completion_tokens=1024,
+
+    # Controls diversity via nucleus sampling: 0.5 means half of all
+    # likelihood-weighted options are considered.
+    top_p=1,
+
+    # A stop sequence is a predefined or user-specified text string that
+    # signals an AI to stop generating content, ensuring its responses
+    # remain focused and concise. Examples include punctuation marks and
+    # markers like "[end]".
+    stop=None,
+
+    # If set, partial message deltas will be sent.
+    stream=True,
+
+)
+
+# Print the incremental deltas returned by the LLM.
+
+for chunk in stream:
+print(chunk.choices[0].delta.content, end="")
+Performing a Chat Completion with a Stop Sequence
+Stop sequences allow you to control where the model should stop generating. When the model encounters any of the specified stop sequences, it will halt generation at that point. This is useful when you need responses to end at specific points.
+
+Python
+
+from groq import Groq
+
+client = Groq()
+
+chat_completion = client.chat.completions.create( # # Required parameters #
+messages=[
+# Set an optional system message. This sets the behavior of the
+# assistant and can be used to provide specific instructions for
+# how it should behave throughout the conversation.
+{
+"role": "system",
+"content": "You are a helpful assistant."
+},
+# Set a user message for the assistant to respond to.
+{
+"role": "user",
+"content": "Count to 10. Your response must begin with \"1, \". example: 1, 2, 3, ...",
+}
+],
+
+    # The language model which will generate the completion.
+    model="llama-3.3-70b-versatile",
+
+    #
+    # Optional parameters
+    #
+
+    # Controls randomness: lowering results in less random completions.
+    # As the temperature approaches zero, the model will become deterministic
+    # and repetitive.
+    temperature=0.5,
+
+    # The maximum number of tokens to generate. Requests can use up to
+    # 2048 tokens shared between prompt and completion.
+    max_completion_tokens=1024,
+
+    # Controls diversity via nucleus sampling: 0.5 means half of all
+    # likelihood-weighted options are considered.
+    top_p=1,
+
+    # A stop sequence is a predefined or user-specified text string that
+    # signals an AI to stop generating content, ensuring its responses
+    # remain focused and concise. Examples include punctuation marks and
+    # markers like "[end]".
+    # For this example, we will use ", 6" so that the llm stops counting at 5.
+    # If multiple stop values are needed, an array of string may be passed,
+    # stop=[", 6", ", six", ", Six"]
+    stop=", 6",
+
+    # If set, partial message deltas will be sent.
+    stream=False,
+
+)
+
+# Print the completion returned by the LLM.
+
+print(chat_completion.choices[0].message.content)
+Performing an Async Chat Completion
+For applications that need to maintain responsiveness while waiting for completions, you can use the asynchronous client. This lets you make non-blocking API calls using Python's asyncio framework.
+
+Python
+
+import asyncio
+
+from groq import AsyncGroq
+
+async def main():
+client = AsyncGroq()
+
+    chat_completion = await client.chat.completions.create(
+        #
+        # Required parameters
+        #
+        messages=[
+            # Set an optional system message. This sets the behavior of the
+            # assistant and can be used to provide specific instructions for
+            # how it should behave throughout the conversation.
+            {
+                "role": "system",
+                "content": "You are a helpful assistant."
+            },
+            # Set a user message for the assistant to respond to.
+            {
+                "role": "user",
+                "content": "Explain the importance of fast language models",
+            }
+        ],
+
+        # The language model which will generate the completion.
+        model="llama-3.3-70b-versatile",
+
+        #
+        # Optional parameters
+        #
+
+        # Controls randomness: lowering results in less random completions.
+        # As the temperature approaches zero, the model will become
+        # deterministic and repetitive.
+        temperature=0.5,
+
+        # The maximum number of tokens to generate. Requests can use up to
+        # 2048 tokens shared between prompt and completion.
+        max_completion_tokens=1024,
+
+        # Controls diversity via nucleus sampling: 0.5 means half of all
+        # likelihood-weighted options are considered.
+        top_p=1,
+
+        # A stop sequence is a predefined or user-specified text string that
+        # signals an AI to stop generating content, ensuring its responses
+        # remain focused and concise. Examples include punctuation marks and
+        # markers like "[end]".
+        stop=None,
+
+        # If set, partial message deltas will be sent.
+        stream=False,
+    )
+
+    # Print the completion returned by the LLM.
+    print(chat_completion.choices[0].message.content)
+
+asyncio.run(main())
+Streaming an Async Chat Completion
+You can combine the benefits of streaming and asynchronous processing by streaming completions asynchronously. This is particularly useful for applications that need to handle multiple concurrent conversations.
+
+Python
+
+import asyncio
+
+from groq import AsyncGroq
+
+async def main():
+client = AsyncGroq()
+
+    stream = await client.chat.completions.create(
+        #
+        # Required parameters
+        #
+        messages=[
+            # Set an optional system message. This sets the behavior of the
+            # assistant and can be used to provide specific instructions for
+            # how it should behave throughout the conversation.
+            {
+                "role": "system",
+                "content": "You are a helpful assistant."
+            },
+            # Set a user message for the assistant to respond to.
+            {
+                "role": "user",
+                "content": "Explain the importance of fast language models",
+            }
+        ],
+
+        # The language model which will generate the completion.
+        model="llama-3.3-70b-versatile",
+
+        #
+        # Optional parameters
+        #
+
+        # Controls randomness: lowering results in less random completions.
+        # As the temperature approaches zero, the model will become
+        # deterministic and repetitive.
+        temperature=0.5,
+
+        # The maximum number of tokens to generate. Requests can use up to
+        # 2048 tokens shared between prompt and completion.
+        max_completion_tokens=1024,
+
+        # Controls diversity via nucleus sampling: 0.5 means half of all
+        # likelihood-weighted options are considered.
+        top_p=1,
+
+        # A stop sequence is a predefined or user-specified text string that
+        # signals an AI to stop generating content, ensuring its responses
+        # remain focused and concise. Examples include punctuation marks and
+        # markers like "[end]".
+        stop=None,
+
+        # If set, partial message deltas will be sent.
+        stream=True,
+    )
+
+    # Print the incremental deltas returned by the LLM.
+    async for chunk in stream:
+        print(chunk.choices[0].delta.content, end="")
+
+asyncio.run(main())
+JSON Mode
+JSON mode is a specialized feature that guarantees all chat completions will be returned as valid JSON. This is particularly useful for applications that need to parse and process structured data from model responses.
+
+For more information on ensuring that the JSON output adheres to a specific schema, jump to: JSON Mode with Schema Validation.
+
+How to Use JSON Mode
+To use JSON mode:
+
+Set "response_format": {"type": "json_object"} in your chat completion request
+Include a description of the desired JSON structure in your system prompt
+Process the returned JSON in your application
+Best Practices for JSON Generation
+Choose the right model: Llama performs best at generating JSON, followed by Gemma
+Format preference: Request pretty-printed JSON instead of compact JSON for better readability
+Keep prompts concise: Clear, direct instructions produce better JSON outputs
+Provide schema examples: Include examples of the expected JSON structure in your system prompt
+Limitations
+JSON mode does not support streaming responses
+Stop sequences cannot be used with JSON mode
+If JSON generation fails, Groq will return a 400 error with code json_validate_failed
+Example System Prompts
+Here are practical examples showing how to structure system messages that will produce well-formed JSON:
+
+Data Analysis API
+The Data Analysis API example demonstrates how to create a system prompt that instructs the model to perform sentiment analysis on user-provided text and return the results in a structured JSON format. This pattern can be adapted for various data analysis tasks such as classification, entity extraction, or summarization.
+
+Python
+JavaScript
+Python
+
+from groq import Groq
+
+client = Groq()
+
+response = client.chat.completions.create(
+model="llama-3.1-8b-instant",
+messages=[
+{
+"role": "system",
+"content": "You are a data analysis API that performs sentiment analysis on text. Respond only with JSON using this format: {\"sentiment_analysis\": {\"sentiment\": \"positive|negative|neutral\", \"confidence_score\": 0.95, \"key_phrases\": [{\"phrase\": \"detected key phrase\", \"sentiment\": \"positive|negative|neutral\"}], \"summary\": \"One sentence summary of the overall sentiment\"}}"
+},
+{
+"role": "user",
+"content": "Analyze the sentiment of this customer review: 'I absolutely love this product! The quality exceeded my expectations, though shipping took longer than expected.'"
+}
+],
+response_format={"type": "json_object"}
+)
+
+print(response.choices[0].message.content)
+These examples show how to structure system prompts to guide the model to produce well-formed JSON with your desired schema.
+
+Sample JSON output from the sentiment analysis prompt:
+
+JavaScript
+
+{
+"sentiment_analysis": {
+"sentiment": "positive",
+"confidence_score": 0.84,
+"key_phrases": [
+{
+"phrase": "absolutely love this product",
+"sentiment": "positive"
+},
+{
+"phrase": "quality exceeded my expectations",
+"sentiment": "positive"
+}
+],
+"summary": "The reviewer loves the product's quality, but was slightly disappointed with the shipping time."
+}
+}
+In this JSON response:
+
+sentiment: Overall sentiment classification (positive, negative, or neutral)
+confidence_score: A numerical value between 0 and 1 indicating the model's confidence in its sentiment classification
+key_phrases: An array of important phrases extracted from the input text, each with its own sentiment classification
+summary: A concise summary of the sentiment analysis capturing the main points
+
+Using structured JSON outputs like this makes it easy for your application to programmatically parse and process the model's analysis. For more information on validating JSON outputs, see our dedicated guide on JSON Mode with Schema Validation.
+
+Code Examples
+Python
+JavaScript
+The following Python example demonstrates how to use JSON mode with the Groq Chat Completions API. It sets up a request with a system prompt instructing the model to generate a JSON summary of a restaurant, then processes and displays the structured JSON response.
+
+Python
+
+from typing import List, Optional
+import json
+
+from pydantic import BaseModel
+from groq import Groq
+
+groq = Groq()
+
+# Data model for LLM to generate
+
+class Ingredient(BaseModel):
+name: str
+quantity: str
+quantity_unit: Optional[str]
+
+class Recipe(BaseModel):
+recipe_name: str
+ingredients: List[Ingredient]
+directions: List[str]
+
+def get_recipe(recipe_name: str) -> Recipe:
+chat_completion = groq.chat.completions.create(
+messages=[
+{
+"role": "system",
+"content": "You are a recipe database that outputs recipes in JSON.\n"
+# Pass the json schema to the model. Pretty printing improves results.
+f" The JSON object must use the schema: {json.dumps(Recipe.model_json_schema(), indent=2)}",
+},
+{
+"role": "user",
+"content": f"Fetch a recipe for {recipe_name}",
+},
+],
+model="meta-llama/llama-4-scout-17b-16e-instruct",
+temperature=0, # Streaming is not supported in JSON mode
+stream=False, # Enable JSON mode by setting the response format
+response_format={"type": "json_object"},
+)
+return Recipe.model_validate_json(chat_completion.choices[0].message.content)
+
+def print_recipe(recipe: Recipe):
+print("Recipe:", recipe.recipe_name)
+
+    print("\nIngredients:")
+    for ingredient in recipe.ingredients:
+        print(
+            f"- {ingredient.name}: {ingredient.quantity} {ingredient.quantity_unit or ''}"
+        )
+    print("\nDirections:")
+    for step, direction in enumerate(recipe.directions, start=1):
+        print(f"{step}. {direction}")
+
+recipe = get_recipe("apple pie")
+print_recipe(recipe)
+JSON Mode with Schema Validation
+Schema validation allows you to ensure that the response conforms to a schema, making them more reliable and easier to process programmatically.
+
+While JSON mode ensures syntactically valid JSON, schema validation adds an additional layer of type checking and field validation to guarantee that the response not only parses as JSON but also conforms to your exact requirements.
+
+Using Zod (or Pydantic in Python)
+Zod is a TypeScript-first schema validation library that makes it easy to define and enforce schemas. In Python, Pydantic serves a similar purpose. This example demonstrates validating a product catalog entry with basic fields like name, price, and description.
+
+Python
+JavaScript
+TypeScript
+Python
+
+import os
+import json
+from groq import Groq
+from pydantic import BaseModel, Field, ValidationError # pip install pydantic
+from typing import List
+
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
+# Define a schema with Pydantic (Python's equivalent to Zod)
+
+class Product(BaseModel):
+id: str
+name: str
+price: float
+description: str
+in_stock: bool
+tags: List[str] = Field(default_factory=list)
+
+# Prompt design is critical for structured outputs
+
+system_prompt = """
+You are a product catalog assistant. When asked about products,
+always respond with valid JSON objects that match this structure:
+{
+"id": "string",
+"name": "string",
+"price": number,
+"description": "string",
+"in_stock": boolean,
+"tags": ["string"]
+}
+Your response should ONLY contain the JSON object and nothing else.
+"""
+
+# Request structured data from the model
+
+completion = client.chat.completions.create(
+model="llama-3.3-70b-versatile",
+response_format={"type": "json_object"},
+messages=[
+{"role": "system", "content": system_prompt},
+{"role": "user", "content": "Tell me about a popular smartphone product"}
+]
+)
+
+# Extract and validate the response
+
+try:
+response_content = completion.choices[0].message.content # Parse JSON
+json_data = json.loads(response_content) # Validate against schema
+product = Product(\*\*json_data)
+print("Validation successful! Structured data:")
+print(product.model_dump_json(indent=2))
+except json.JSONDecodeError:
+print("Error: The model did not return valid JSON")
+except ValidationError as e:
+print(f"Error: The JSON did not match the expected schema: {e}")
+Benefits of Schema Validation
+Type Checking: Ensure fields have the correct data types
+Required Fields: Specify which fields must be present
+Constraints: Set min/max values, length requirements, etc.
+Default Values: Provide fallbacks for missing fields
+Custom Validation: Add custom validation logic as needed
+Using Instructor Library
+The Instructor library provides a more streamlined experience by combining API calls with schema validation in a single step. This example creates a structured recipe with ingredients and cooking instructions, demonstrating automatic validation and retry logic.
+
+Python
+JavaScript
+TypeScript
+Python
+
+import os
+from typing import List
+from pydantic import BaseModel, Field # pip install pydantic
+import instructor # pip install instructor
+from groq import Groq
+
+# Set up instructor with Groq
+
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
+# Patch the client with instructor
+
+instructor_client = instructor.patch(client)
+
+# Define your schema with Pydantic
+
+class RecipeIngredient(BaseModel):
+name: str
+quantity: str
+unit: str = Field(description="The unit of measurement, like cup, tablespoon, etc.")
+
+class Recipe(BaseModel):
+title: str
+description: str
+prep_time_minutes: int
+cook_time_minutes: int
+ingredients: List[RecipeIngredient]
+instructions: List[str] = Field(description="Step by step cooking instructions")
+
+# Request structured data with automatic validation
+
+recipe = instructor_client.chat.completions.create(
+model="llama-3.3-70b-versatile",
+response_model=Recipe,
+messages=[
+{"role": "user", "content": "Give me a recipe for chocolate chip cookies"}
+],
+max_retries=2 # Instructor will retry if validation fails
+)
+
+# No need for try/except or manual validation - instructor handles it!
+
+print(f"Recipe: {recipe.title}")
+print(f"Prep time: {recipe.prep_time_minutes} minutes")
+print(f"Cook time: {recipe.cook_time_minutes} minutes")
+print("\nIngredients:")
+for ingredient in recipe.ingredients:
+print(f"- {ingredient.quantity} {ingredient.unit} {ingredient.name}")
+print("\nInstructions:")
+for i, step in enumerate(recipe.instructions, 1):
+print(f"{i}. {step}")
+Advantages of Instructor
+Retry Logic: Automatically retry on validation failures
+Error Messages: Detailed error messages for model feedback
+Schema Extraction: The schema is translated into prompt instructions
+Streamlined API: Single function call for both completion and validation
+Prompt Engineering for Schema Validation
+The quality of schema generation and validation depends heavily on how you formulate your system prompt. This example compares a poor prompt with a well-designed one by requesting movie information, showing how proper prompt design leads to more reliable structured data.
+
+Python
+JavaScript
+TypeScript
+Python
+
+import os
+import json
+from groq import Groq
+
+# Set your API key
+
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
+# Example of a poorly designed prompt
+
+poor_prompt = """
+Give me information about a movie in JSON format.
+"""
+
+# Example of a well-designed prompt
+
+effective_prompt = """
+You are a movie database API. Return information about a movie with the following
+JSON structure:
+
+{
+"title": "string",
+"year": number,
+"director": "string",
+"genre": ["string"],
+"runtime_minutes": number,
+"rating": number (1-10 scale),
+"box_office_millions": number,
+"cast": [
+{
+"actor": "string",
+"character": "string"
+}
+]
+}
+
+The response must:
+
+1. Include ALL fields shown above
+2. Use only the exact field names shown
+3. Follow the exact data types specified
+4. Contain ONLY the JSON object and nothing else
+
+IMPORTANT: Do not include any explanatory text, markdown formatting, or code blocks.
+"""
+
+# Function to run the completion and display results
+
+def get_movie_data(prompt, title="Example"):
+print(f"\n--- {title} ---")
+
+    completion = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": "Tell me about The Matrix"}
+        ]
+    )
+
+    response_content = completion.choices[0].message.content
+    print("Raw response:")
+    print(response_content)
+
+    # Try to parse as JSON
+    try:
+        movie_data = json.loads(response_content)
+        print("\nSuccessfully parsed as JSON!")
+
+        # Check for expected fields
+        expected_fields = ["title", "year", "director", "genre",
+                          "runtime_minutes", "rating", "box_office_millions", "cast"]
+        missing_fields = [field for field in expected_fields if field not in movie_data]
+
+        if missing_fields:
+            print(f"Missing fields: {', '.join(missing_fields)}")
+        else:
+            print("All expected fields present!")
+
+    except json.JSONDecodeError:
+        print("\nFailed to parse as JSON. Response is not valid JSON.")
+
+# Compare the results of both prompts
+
+get_movie_data(poor_prompt, "Poor Prompt Example")
+get_movie_data(effective_prompt, "Effective Prompt Example")
+Key Elements of Effective Prompts
+Clear Role Definition: Tell the model it's an API or data service
+Complete Schema Example: Show the exact structure with field names and types
+Explicit Requirements: List all requirements clearly and numerically
+Data Type Specifications: Indicate the expected type for each field
+Format Instructions: Specify that the response should contain only JSON
+Constraints: Add range or validation constraints where applicable
+Working with Complex Schemas
+Real-world applications often require complex, nested schemas with multiple levels of objects, arrays, and optional fields. This example creates a detailed product catalog entry with variants, reviews, and manufacturer information, demonstrating how to handle deeply nested data structures.
+
+Python
+JavaScript
+TypeScript
+Python
+
+import os
+from typing import List, Optional, Dict, Union
+from pydantic import BaseModel, Field # pip install pydantic
+from groq import Groq
+import instructor # pip install instructor
+
+# Set up the client with instructor
+
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+instructor_client = instructor.patch(client)
+
+# Define a complex nested schema
+
+class Address(BaseModel):
+street: str
+city: str
+state: str
+zip_code: str
+country: str
+
+class ContactInfo(BaseModel):
+email: str
+phone: Optional[str] = None
+address: Address
+
+class ProductVariant(BaseModel):
+id: str
+name: str
+price: float
+inventory_count: int
+attributes: Dict[str, str]
+
+class ProductReview(BaseModel):
+user_id: str
+rating: float = Field(ge=1, le=5)
+comment: str
+date: str
+
+class Product(BaseModel):
+id: str
+name: str
+description: str
+main_category: str
+subcategories: List[str]
+variants: List[ProductVariant]
+reviews: List[ProductReview]
+average_rating: float = Field(ge=1, le=5)
+manufacturer: Dict[str, Union[str, ContactInfo]]
+
+# System prompt with clear instructions about the complex structure
+
+system_prompt = """
+You are a product catalog API. Generate a detailed product with ALL required fields.
+Your response must be a valid JSON object matching the following schema:
+
+{
+"id": "string",
+"name": "string",
+"description": "string",
+"main_category": "string",
+"subcategories": ["string"],
+"variants": [
+{
+"id": "string",
+"name": "string",
+"price": number,
+"inventory_count": number,
+"attributes": {"key": "value"}
+}
+],
+"reviews": [
+{
+"user_id": "string",
+"rating": number (1-5),
+"comment": "string",
+"date": "string (YYYY-MM-DD)"
+}
+],
+"average_rating": number (1-5),
+"manufacturer": {
+"name": "string",
+"founded": "string",
+"contact_info": {
+"email": "string",
+"phone": "string (optional)",
+"address": {
+"street": "string",
+"city": "string",
+"state": "string",
+"zip_code": "string",
+"country": "string"
+}
+}
+}
+}
+"""
+
+# Use instructor to create and validate in one step
+
+product = instructor_client.chat.completions.create(
+model="llama-3.3-70b-versatile",
+response_model=Product,
+messages=[
+{"role": "system", "content": system_prompt},
+{"role": "user", "content": "Give me details about a high-end camera product"}
+],
+max_retries=3
+)
+
+# Print the validated complex object
+
+print(f"Product: {product.name}")
+print(f"Description: {product.description[:100]}...")
+print(f"Variants: {len(product.variants)}")
+print(f"Reviews: {len(product.reviews)}")
+print(f"Manufacturer: {product.manufacturer.get('name')}")
+print("\nManufacturer Contact:")
+contact_info = product.manufacturer.get('contact_info')
+if isinstance(contact_info, ContactInfo):
+print(f" Email: {contact_info.email}")
+print(f" Address: {contact_info.address.city}, {contact_info.address.country}")
+Tips for Complex Schemas
+Decompose: Break complex schemas into smaller, reusable components
+Document Fields: Add descriptions to fields in your schema definition
+Provide Examples: Include examples of valid objects in your prompt
+Validate Incrementally: Consider validating subparts of complex responses separately
+Use Types: Leverage type inference to ensure correct handling in your code
+Best Practices
+Schema
+Prompt
+Error
+Start simple and add complexity as needed.
+Make fields optional when appropriate.
+Provide sensible defaults for optional fields.
+Use specific types and constraints rather than general ones.
+Add descriptions to your schema definitions.
