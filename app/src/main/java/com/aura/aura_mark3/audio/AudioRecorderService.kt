@@ -62,15 +62,40 @@ class AudioRecorderService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (checkPermission()) {
+        Log.i("AURA_AUDIO", "AudioRecorderService onStartCommand called")
+        
+        if (!checkPermission()) {
+            Log.e("AURA_AUDIO", "Missing RECORD_AUDIO permission")
+            broadcastError("Missing microphone permission")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        
+        try {
             val notification = buildNotification()
             startForeground(NOTIFICATION_ID, notification)
-            startRecording()
-        } else {
-            Log.e("AURA_AUDIO", "Missing RECORD_AUDIO permission")
+            Log.i("AURA_AUDIO", "Started foreground service successfully")
+            
+            // Start recording with a small delay to ensure service is fully started
+            mainHandler.postDelayed({
+                startRecording()
+            }, 500)
+            
+        } catch (e: Exception) {
+            Log.e("AURA_AUDIO", "Failed to start foreground service", e)
+            broadcastError("Failed to start recording service")
             stopSelf()
+            return START_NOT_STICKY
         }
+        
         return START_STICKY
+    }
+
+    private fun broadcastError(message: String) {
+        val intent = Intent(ACTION_TRANSCRIPTION).apply {
+            putExtra(EXTRA_TRANSCRIPTION, "")
+        }
+        sendBroadcast(intent)
     }
 
     private fun checkPermission(): Boolean {
@@ -110,61 +135,129 @@ class AudioRecorderService : Service() {
     }
 
     private fun startRecording() {
-        if (isRecording.get()) return
+        if (isRecording.get()) {
+            Log.w("AURA_AUDIO", "Already recording, ignoring start request")
+            return
+        }
+        
         if (!checkPermission()) {
             Log.e("AURA_AUDIO", "Cannot start recording - missing permission")
+            broadcastError("Microphone permission denied")
+            stopSelf()
             return
         }
 
         val bufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
+        if (bufferSize == AudioRecord.ERROR || bufferSize == AudioRecord.ERROR_BAD_VALUE) {
+            Log.e("AURA_AUDIO", "Invalid buffer size: $bufferSize")
+            broadcastError("Audio configuration error")
+            stopSelf()
+            return
+        }
 
         try {
-            audioRecord = AudioRecord(
+            // Check if AudioRecord can be created before actually creating it
+            val testRecord = AudioRecord(
                 AUDIO_SOURCE, SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT, bufferSize
             )
-
-            outputFile = File(cacheDir, "recording.pcm")
+            
+            if (testRecord.state != AudioRecord.STATE_INITIALIZED) {
+                Log.e("AURA_AUDIO", "AudioRecord failed to initialize - state: ${testRecord.state}")
+                testRecord.release()
+                broadcastError("Failed to initialize audio recording")
+                stopSelf()
+                return
+            }
+            
+            // If test succeeded, use it as the actual recorder
+            audioRecord = testRecord
+            outputFile = File(cacheDir, "recording_${System.currentTimeMillis()}.pcm")
+            
+            Log.i("AURA_AUDIO", "Starting audio recording to ${outputFile?.name}")
             isRecording.set(true)
             audioRecord?.startRecording()
 
             recordingThread = Thread {
                 val buffer = ByteArray(bufferSize)
-                FileOutputStream(outputFile).use { fos ->
-                    while (isRecording.get()) {
-                        val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
-                        if (read > 0) {
-                            fos.write(buffer, 0, read)
+                try {
+                    FileOutputStream(outputFile).use { fos ->
+                        Log.i("AURA_AUDIO", "Recording thread started")
+                        while (isRecording.get()) {
+                            val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
+                            if (read > 0) {
+                                fos.write(buffer, 0, read)
+                            } else if (read < 0) {
+                                Log.w("AURA_AUDIO", "AudioRecord read error: $read")
+                                break
+                            }
                         }
+                        Log.i("AURA_AUDIO", "Recording thread finished")
                     }
+                } catch (e: Exception) {
+                    Log.e("AURA_AUDIO", "Error in recording thread", e)
+                    isRecording.set(false)
                 }
             }
 
             recordingThread?.start()
+            Log.i("AURA_AUDIO", "Audio recording started successfully")
+            
         } catch (e: SecurityException) {
             Log.e("AURA_AUDIO", "Security exception while creating AudioRecord", e)
+            broadcastError("Audio permission denied")
+            stopSelf()
+        } catch (e: IllegalArgumentException) {
+            Log.e("AURA_AUDIO", "Invalid audio parameters", e)
+            broadcastError("Invalid audio configuration")
+            stopSelf()
+        } catch (e: Exception) {
+            Log.e("AURA_AUDIO", "Unexpected error starting recording", e)
+            broadcastError("Failed to start recording")
             stopSelf()
         }
     }
 
     private fun stopRecording() {
-        if (!isRecording.get()) return
+        if (!isRecording.get()) {
+            Log.w("AURA_AUDIO", "Not recording, ignoring stop request")
+            return
+        }
 
+        Log.i("AURA_AUDIO", "Stopping audio recording")
         isRecording.set(false)
 
         try {
-            recordingThread?.join()
+            // Wait for recording thread to finish
+            recordingThread?.join(3000) // 3 second timeout
         } catch (e: InterruptedException) {
-            e.printStackTrace()
+            Log.w("AURA_AUDIO", "Recording thread join interrupted", e)
         }
 
-        audioRecord?.stop()
-        audioRecord?.release()
+        try {
+            audioRecord?.stop()
+            audioRecord?.release()
+        } catch (e: Exception) {
+            Log.w("AURA_AUDIO", "Error stopping/releasing AudioRecord", e)
+        }
+        
         audioRecord = null
         recordingThread = null
 
         outputFile?.let { file ->
-            transcribeAudioFile(file)
+            if (file.exists() && file.length() > 0) {
+                Log.i("AURA_AUDIO", "Processing recorded file: ${file.length()} bytes")
+                transcribeAudioFile(file)
+            } else {
+                Log.w("AURA_AUDIO", "No audio data recorded")
+                broadcastError("No audio captured")
+            }
+        } ?: run {
+            Log.w("AURA_AUDIO", "No output file created")
+            broadcastError("Recording failed")
         }
+        
+        // Stop the service
+        stopSelf()
     }
 
     private fun loadApiKey(): String {

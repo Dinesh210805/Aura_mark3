@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,6 +26,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.*
 
 /**
@@ -447,19 +450,39 @@ private fun BottomControls(
     onManualRecord: () -> Unit,
     isTablet: Boolean
 ) {
+    var isPressed by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Center
     ) {
         // Manual record button
         FilledTonalButton(
-            onClick = onManualRecord,
+            onClick = { 
+                isPressed = true
+                onManualRecord()
+                // Reset pressed state after a short delay
+                coroutineScope.launch {
+                    delay(200)
+                    isPressed = false
+                }
+            },
             modifier = Modifier
                 .height(if (isTablet) 56.dp else 48.dp)
-                .widthIn(min = if (isTablet) 200.dp else 160.dp),
+                .widthIn(min = if (isTablet) 200.dp else 160.dp)
+                .scale(if (isPressed) 0.95f else 1f),
             colors = ButtonDefaults.filledTonalButtonColors(
-                containerColor = if (isListening) Color(0xFFFF5722).copy(alpha = 0.3f) else Color(0xFF64FFDA).copy(alpha = 0.2f),
-                contentColor = if (isListening) Color(0xFFFF5722) else Color(0xFF64FFDA)
+                containerColor = when {
+                    isPressed -> Color(0xFF00BCD4).copy(alpha = 0.5f)
+                    isListening -> Color(0xFFFF5722).copy(alpha = 0.3f) 
+                    else -> Color(0xFF64FFDA).copy(alpha = 0.2f)
+                },
+                contentColor = when {
+                    isPressed -> Color(0xFF00BCD4)
+                    isListening -> Color(0xFFFF5722) 
+                    else -> Color(0xFF64FFDA)
+                }
             ),
             shape = RoundedCornerShape(24.dp)
         ) {

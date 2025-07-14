@@ -543,8 +543,18 @@ class EnhancedVoiceService : Service() {
     }
 
     private fun loadApiKey(): String {
+        // Try environment variable first
+        val envKey = System.getenv("GROQ_API_KEY")
+        if (!envKey.isNullOrBlank()) {
+            return envKey
+        }
+        // Fallback to properties file
         return try {
-            assets.open("api_key.txt").bufferedReader().use { it.readText().trim() }
+            val properties = java.util.Properties()
+            assets.open("api_keys.properties").use {
+                properties.load(it)
+            }
+            properties.getProperty("groq_api_key", "")
         } catch (e: Exception) {
             Log.e("EnhancedVoiceService", "Failed to load API key", e)
             ""

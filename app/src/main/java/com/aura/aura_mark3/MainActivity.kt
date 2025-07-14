@@ -58,6 +58,7 @@ import android.content.SharedPreferences
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.Image
 import androidx.activity.result.ActivityResultLauncher
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import android.os.Build
 import android.util.Log
@@ -149,6 +150,14 @@ class MainActivity : ComponentActivity() {
     private var currentAudioLevel by mutableStateOf(0)
     private var listeningType by mutableStateOf("stopped") // "wake_word", "command", "stopped"
     
+    // Conversation flow variables for proper Siri-like experience
+    private var isSpeaking by mutableStateOf(false)
+    private var speakingTimeoutHandler: Handler? = null
+    private val SPEAKING_TIMEOUT = 30000L // 30 seconds timeout
+    private var shouldStartListeningAfterSpeech by mutableStateOf(false)
+    private var typingAnimation by mutableStateOf("")
+    private var conversationMode by mutableStateOf(false)
+    
     // Conversation state for advanced voice assistant
     private var conversationHistory = mutableListOf<CompoundMessage>()
     private var isProcessingRequest by mutableStateOf(false)
@@ -192,18 +201,76 @@ class MainActivity : ComponentActivity() {
     private val transcriptionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val transcription = intent?.getStringExtra(AudioRecorderService.EXTRA_TRANSCRIPTION) ?: ""
-            Log.i("AURA_STT", "Transcription received: $transcription")
-            userTranscription = transcription
-            isRecording = false
-            if (transcription.isNotBlank()) {
-                // Process the voice command
-                statusMessage = "Processing your command..."
-                processVoiceCommand(transcription)
-            } else {
-                statusMessage = "No speech detected. Please try again."
-                speakWithPlayAITts("I didn't hear anything. Please try speaking again.", selectedVoice, ttsSpeed)
+            Log.i("AURA_STT", "Manual transcription received: '$transcription'")
+            
+            isRecording = false // Always reset recording state
+            
+            if (transcription.isBlank()) {
+                Log.w("AURA_STT", "Empty transcription received")
+                statusMessage = "I didn't hear anything. Tap mic to try again."
+                if (conversationMode) {
+                    speakWithPlayAITts("I didn't hear anything. Please tap the microphone and try again.", selectedVoice, ttsSpeed)
+                    conversationMode = false // Exit conversation mode on error
+                }
+                return
+            }
+            
+            // Filter out AURA's own voice to prevent feedback loops
+            val filteredTranscription = filterOutAuraVoice(transcription)
+            
+            if (filteredTranscription.isBlank()) {
+                Log.w("AURA_STT", "Transcription filtered out (likely AURA's own voice): '$transcription'")
+                statusMessage = "I caught my own voice. Try again."
+                if (conversationMode) {
+                    speakWithPlayAITts("Sorry, I caught my own voice. Could you please try again?", selectedVoice, ttsSpeed) {
+                        shouldStartListeningAfterSpeech = true
+                    }
+                } else {
+                    speakWithPlayAITts("Sorry, I caught my own voice. Please tap the microphone and try again.", selectedVoice, ttsSpeed)
+                }
+                return
+            }
+            
+            // Process the valid transcription
+            Log.i("AURA_STT", "Processing filtered transcription: '$filteredTranscription'")
+            processVoiceCommandWithAnimation(filteredTranscription)
+        }
+    }
+    
+    /**
+     * Filter out AURA's own voice from transcription to prevent feedback loops
+     */
+    private fun filterOutAuraVoice(transcription: String): String {
+        val auraPhrasesToFilter = listOf(
+            "I'm listening",
+            "Please speak your command",
+            "Processing your command",
+            "How can I help you",
+            "What can I do for you",
+            "I'm here to help",
+            "Ready for commands"
+        )
+        
+        var filtered = transcription.trim()
+        
+        // Remove AURA's common phrases
+        auraPhrasesToFilter.forEach { phrase ->
+            filtered = filtered.replace(phrase, "", ignoreCase = true)
+        }
+        
+        // Remove any text that starts with "I'm" (likely AURA talking)
+        if (filtered.trim().startsWith("I'm", ignoreCase = true)) {
+            val words = filtered.split(" ")
+            // Find the first user-like word and take from there
+            val userStartIndex = words.indexOfFirst { word ->
+                !word.matches(Regex("I'm|listening|please|speak|your|command|processing|how|can|help|you|what|do|for|here|to|ready|commands", RegexOption.IGNORE_CASE))
+            }
+            if (userStartIndex > 0) {
+                filtered = words.drop(userStartIndex).joinToString(" ")
             }
         }
+        
+        return filtered.trim()
     }
 
     // Receiver for foreground package name
@@ -235,10 +302,14 @@ class MainActivity : ComponentActivity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == EnhancedVoiceService.ACTION_VOICE_TRANSCRIPTION) {
                 val transcription = intent.getStringExtra(EnhancedVoiceService.EXTRA_TRANSCRIPTION) ?: ""
-                Log.i("AURA_VOICE", "Voice command received: $transcription")
+                Log.i("AURA_VOICE", "Enhanced Voice Service command received: $transcription")
                 userTranscription = transcription
                 if (transcription.isNotBlank()) {
+                    // Process voice command immediately
+                    statusMessage = "Processing your command..."
                     processVoiceCommand(transcription)
+                } else {
+                    statusMessage = "Ready for voice commands. Say 'Hey Aura' to start."
                 }
             }
         }
@@ -634,10 +705,16 @@ class MainActivity : ComponentActivity() {
      */
     private fun performInitialGreeting() {
         if (!hasGreeted) {
-            statusMessage = "Initializing AURA..."
-            speakWithPlayAITts("Hello! I'm AURA, your intelligent voice assistant. Tap the microphone to talk to me.", selectedVoice, ttsSpeed) {
+            statusMessage = "AURA is coming online..."
+            speakWithPlayAITts("Hello! I'm AURA, your intelligent voice assistant. I'm ready to help you with anything you need. You can tap the microphone button to talk to me, or just say 'Hey Aura' if voice detection is working.", selectedVoice, ttsSpeed) {
                 hasGreeted = true
-                statusMessage = "Ready - Tap microphone or say 'Hey Aura'"
+                statusMessage = "Ready! Tap microphone or say 'Hey Aura'"
+                // Try to greet with Compound Beta for a more dynamic experience
+                Handler(Looper.getMainLooper()).postDelayed({
+                    if (loadApiKey().isNotBlank()) {
+                        greetUserWithCompoundBeta()
+                    }
+                }, 2000)
             }
         }
     }
@@ -860,24 +937,19 @@ class MainActivity : ComponentActivity() {
                                 assistantSpeech = assistantSpeech,
                                 statusMessage = statusMessage,
                                 onManualRecord = { 
+                                    Log.i("AURA_VOICE", "=== BUTTON CLICKED - onManualRecord callback triggered ===")
+                                    runOnUiThread {
+                                        if (isSpeaking) {
+                                            Toast.makeText(this@MainActivity, "Interrupting AURA...", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(this@MainActivity, "Starting recording...", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
                                     // Manual activation for testing
                                     manualVoiceActivation()
                                 },
                                 onSettings = { inSettings = true }
                             )
-                        }
-                        // Only one CaptionBar at the bottom, animated
-                        // AnimatedVisibility for smooth in/out
-                        Box(modifier = Modifier.align(Alignment.BottomCenter)) {
-                            androidx.compose.animation.AnimatedVisibility(
-                                visible = userTranscription.isNotBlank() || assistantSpeech.isNotBlank()
-                            ) {
-                                CaptionBar(
-                                    userTranscription = userTranscription,
-                                    assistantSpeech = assistantSpeech,
-                                    modifier = Modifier
-                                )
-                            }
                         }
                     }
                 }
@@ -1003,13 +1075,18 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        // Set speaking state to prevent recording interference
+        isSpeaking = true
+        startSpeakingTimeout() // Start timeout counter
         assistantSpeech = message // Always show the message in the caption bar
 
         val apiKey = loadApiKey()
         if (apiKey.isBlank()) {
             Log.w("AURA_TTS", "No API key found, falling back to local TTS")
+            speakingTimeoutHandler?.removeCallbacksAndMessages(null)
             speakIfReady(message)
             assistantSpeech = ""
+            isSpeaking = false
             onDone?.invoke()
             return
         }
@@ -1028,25 +1105,42 @@ class MainActivity : ComponentActivity() {
                     response.body()?.let { responseBody ->
                         playAudioFromResponse(this@MainActivity, responseBody, onComplete = {
                             // Clear assistantSpeech after playback
+                            speakingTimeoutHandler?.removeCallbacksAndMessages(null)
                             assistantSpeech = ""
+                            isSpeaking = false
+                            
+                            // Start listening for next command if in conversation mode
+                            if (shouldStartListeningAfterSpeech && conversationMode) {
+                                shouldStartListeningAfterSpeech = false
+                                Handler(Looper.getMainLooper()).postDelayed({
+                                    startManualRecordingForConversation()
+                                }, 500) // Small delay to ensure audio is fully stopped
+                            }
+                            
                             onDone?.invoke()
                         }, onError = {
                             Log.e("AURA_TTS", "Error playing PlayAI TTS audio, falling back to local TTS")
+                            speakingTimeoutHandler?.removeCallbacksAndMessages(null)
                             speakIfReady(message)
                             assistantSpeech = ""
+                            isSpeaking = false
                             onDone?.invoke()
                         })
                     } ?: run {
                         Log.e("AURA_TTS", "PlayAI TTS response body is null")
+                        speakingTimeoutHandler?.removeCallbacksAndMessages(null)
                         speakIfReady(message)
                         assistantSpeech = ""
+                        isSpeaking = false
                         onDone?.invoke()
                     }
                 } else {
                     Log.e("AURA_TTS", "PlayAI TTS API error: ${response.code()} ${response.message()}")
                     // Fallback to local TTS
+                    speakingTimeoutHandler?.removeCallbacksAndMessages(null)
                     speakIfReady(message)
                     assistantSpeech = ""
+                    isSpeaking = false
                     onDone?.invoke()
                 }
             }
@@ -1054,8 +1148,10 @@ class MainActivity : ComponentActivity() {
             override fun onFailure(call: Call<ResponseBody>, t: Throwable) {
                 Log.e("AURA_TTS", "PlayAI TTS API call failed: ${t.localizedMessage}")
                 // Fallback to local TTS
+                speakingTimeoutHandler?.removeCallbacksAndMessages(null)
                 speakIfReady(message)
                 assistantSpeech = ""
+                isSpeaking = false
                 onDone?.invoke()
             }
         })
@@ -1116,6 +1212,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        
+        // Clean up timeout handler
+        speakingTimeoutHandler?.removeCallbacksAndMessages(null)
+        speakingTimeoutHandler = null
+        
         try {
             unregisterReceiver(transcriptionReceiver)
             unregisterReceiver(actionResultReceiver)
@@ -1143,50 +1244,55 @@ class MainActivity : ComponentActivity() {
         if (isProcessingRequest) return
         
         isProcessingRequest = true
-        assistantSpeech = "Initializing AURA..."
+        assistantSpeech = "Upgrading to advanced mode..."
         
         val apiKey = loadApiKey()
         if (apiKey.isBlank()) {
             Log.w("AURA_LLM", "No API key found, using fallback greeting")
-            speakWithPlayAITts("Hello, Joyboy! I'm AURA, your voice assistant. How can I help you today?", selectedVoice, ttsSpeed) {
+            speakWithPlayAITts("Hello, Joyboy! I'm AURA, your voice assistant. I'm excited to help you today! What would you like to do?", selectedVoice, ttsSpeed) {
                 isProcessingRequest = false
             }
             return
         }
         
         val compoundApi = provideCompoundBetaApi()
-        val systemPrompt = """You are AURA, an advanced voice assistant for Joyboy. You have access to real-world information and can help with device control, app management, web search, and more. Greet Joyboy warmly and mention your capabilities briefly."""
+        val currentTime = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+        val systemPrompt = """You are AURA, an enthusiastic and intelligent voice assistant for Joyboy. You have access to real-world information and can help with device control, app management, web search, and more. 
+
+        Greet Joyboy warmly with personality and energy. Mention some of your capabilities briefly. Keep it conversational and exciting - make Joyboy feel like they have an amazing AI companion. Current time is $currentTime."""
         
         val request = CompoundRequest(
             model = "compound-beta",
             messages = listOf(
                 CompoundMessage(role = "system", content = systemPrompt),
-                CompoundMessage(role = "user", content = "Hello AURA, I just activated you with the wake word 'Hey Aura'")
+                CompoundMessage(role = "user", content = "Hello AURA, I just activated you. Give me an enthusiastic greeting!")
             ),
             maxTokens = 150,
-            temperature = 0.8f
+            temperature = 0.9f
         )
         
         compoundApi.chatCompletion(apiKey, request).enqueue(object : Callback<CompoundResponse> {
             override fun onResponse(call: Call<CompoundResponse>, response: Response<CompoundResponse>) {
                 val reply = if (response.isSuccessful) {
                     response.body()?.choices?.firstOrNull()?.message?.content ?: 
-                    "Hello, Joyboy! I'm AURA, your intelligent voice assistant. How can I help you today?"
+                    "Hello, Joyboy! I'm AURA, your amazing voice assistant! I'm absolutely thrilled to be here and ready to help you with anything you need. Let's make some magic happen!"
                 } else {
                     Log.w("AURA_LLM", "Compound Beta API returned error: ${response.code()}")
-                    "Hello, Joyboy! I'm AURA, your intelligent voice assistant. How can I help you today?"
+                    "Hello, Joyboy! I'm AURA, your amazing voice assistant! I'm absolutely thrilled to be here and ready to help you with anything you need. Let's make some magic happen!"
                 }
                 
                 conversationHistory.add(CompoundMessage(role = "assistant", content = reply))
                 speakWithPlayAITts(reply, selectedVoice, ttsSpeed) {
                     isProcessingRequest = false
+                    statusMessage = "Ready for commands! Say 'Hey Aura' or tap microphone"
                 }
             }
             
             override fun onFailure(call: Call<CompoundResponse>, t: Throwable) {
                 Log.e("AURA_LLM", "Compound Beta greeting failed", t)
-                speakWithPlayAITts("Hello, Joyboy! I'm AURA, your intelligent voice assistant. How can I help you today?", selectedVoice, ttsSpeed) {
+                speakWithPlayAITts("Hello, Joyboy! I'm AURA, your amazing voice assistant! I'm absolutely thrilled to be here and ready to help you with anything you need. Let's make some magic happen!", selectedVoice, ttsSpeed) {
                     isProcessingRequest = false
+                    statusMessage = "Ready for commands! Say 'Hey Aura' or tap microphone"
                 }
             }
         })
@@ -1196,16 +1302,28 @@ class MainActivity : ComponentActivity() {
      * Process voice commands using Compound Beta API with real-world data access
      */
     private fun processVoiceCommand(command: String) {
-        if (isProcessingRequest) return
+        if (isProcessingRequest) {
+            Log.w("AURA_VOICE", "Already processing a request, ignoring: $command")
+            return
+        }
         
+        Log.i("AURA_VOICE", "Processing command: $command")
         isProcessingRequest = true
-        statusMessage = "Processing your request..."
-        assistantSpeech = "Thinking..."
+        statusMessage = "🤔 Thinking..."
+        assistantSpeech = "Processing your command..."
         
         val apiKey = loadApiKey()
         if (apiKey.isBlank()) {
-            speakWithPlayAITts("I'm sorry, I can't process requests without an API key.", selectedVoice, ttsSpeed)
-            isProcessingRequest = false
+            Log.e("AURA_LLM", "No API key available")
+            speakWithPlayAITts("I'm sorry, I can't process requests without an API key.", selectedVoice, ttsSpeed) {
+                isProcessingRequest = false
+                statusMessage = "Ready for next command"
+                
+                // Continue conversation if in conversation mode
+                if (conversationMode) {
+                    shouldStartListeningAfterSpeech = true
+                }
+            }
             return
         }
         
@@ -1225,22 +1343,35 @@ class MainActivity : ComponentActivity() {
             temperature = 0.7f
         )
         
+        Log.i("AURA_LLM", "Sending request to Compound Beta API")
         compoundApi.chatCompletion(apiKey, request).enqueue(object : Callback<CompoundResponse> {
             override fun onResponse(call: Call<CompoundResponse>, response: Response<CompoundResponse>) {
                 if (response.isSuccessful) {
                     val reply = response.body()?.choices?.firstOrNull()?.message?.content
                     if (!reply.isNullOrBlank()) {
+                        Log.i("AURA_LLM", "Received response: $reply")
                         conversationHistory.add(CompoundMessage(role = "assistant", content = reply))
+                        
+                        // Parse actions first, then speak the clean response
                         parseAndExecuteActions(reply)
-                        speakWithPlayAITts(reply, selectedVoice, ttsSpeed) {
+                        val cleanReply = reply.replace(Regex("\\[ACTION:[^\\]]*\\]"), "").trim()
+                        statusMessage = "💬 Responding..."
+                        
+                        speakWithPlayAITts(cleanReply, selectedVoice, ttsSpeed) {
                             isProcessingRequest = false
                             statusMessage = "Ready for next command"
+                            
+                            // Continue conversation if in conversation mode
+                            if (conversationMode) {
+                                shouldStartListeningAfterSpeech = true
+                            }
                         }
                     } else {
+                        Log.w("AURA_LLM", "Empty response from API")
                         fallbackResponse()
                     }
                 } else {
-                    Log.e("AURA_LLM", "Compound Beta API error: ${response.code()}")
+                    Log.e("AURA_LLM", "API error: ${response.code()} - ${response.message()}")
                     fallbackResponse()
                 }
             }
@@ -1253,9 +1384,21 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun fallbackResponse() {
-        speakWithPlayAITts("I'm sorry, I couldn't process that request. Please try again.", selectedVoice, ttsSpeed) {
+        val responses = listOf(
+            "I'm sorry, I couldn't process that request right now. Could you try asking me again?",
+            "Hmm, I'm having a little trouble with that. Please try your request once more.",
+            "Oops! Something went wrong on my end. Could you repeat that for me?",
+            "I didn't quite catch that. Let's try again - what can I help you with?"
+        )
+        val randomResponse = responses.random()
+        speakWithPlayAITts(randomResponse, selectedVoice, ttsSpeed) {
             isProcessingRequest = false
             statusMessage = "Ready for next command"
+            
+            // Continue conversation if in conversation mode
+            if (conversationMode) {
+                shouldStartListeningAfterSpeech = true
+            }
         }
     }
 
@@ -1275,7 +1418,7 @@ class MainActivity : ComponentActivity() {
             "No screen information available"
         }
         
-        return """You are AURA, an intelligent voice assistant for Android devices. You have access to real-world information via web search and can help with:
+        return """You are AURA, a lively and intelligent voice assistant for Android devices. You're enthusiastic, helpful, and conversational. You have access to real-world information via web search and can help with:
 
                 DEVICE CONTROL ACTIONS:
                 - System settings: WiFi, Bluetooth, brightness, volume
@@ -1284,6 +1427,7 @@ class MainActivity : ComponentActivity() {
 
                 INFORMATION ACCESS:
                 - Web search for current information
+                - Weather, news, facts, calculations
                 - Screen analysis and description
                 - Real-time data access
 
@@ -1291,7 +1435,13 @@ class MainActivity : ComponentActivity() {
                 - $currentApp
                 - $screenInfo
 
-                When the user asks for device actions, respond with natural language AND include specific action commands in this format:
+                PERSONALITY:
+                - Be enthusiastic and energetic in your responses
+                - Show personality - be friendly, helpful, and sometimes playful
+                - Acknowledge commands with enthusiasm ("Absolutely!", "Right away!", "Got it!")
+                - Be conversational and natural, not robotic
+
+                When users ask for device actions, respond with natural language AND include specific action commands in this format:
                 [ACTION: type|parameter1|parameter2]
 
                 Available action types:
@@ -1302,7 +1452,14 @@ class MainActivity : ComponentActivity() {
                 - TAKE_SCREENSHOT
                 - VLM_ACTION|query|action_type (for screen interaction)
 
-                Be conversational, helpful, and use your real-world data access when needed. Always acknowledge the user's request clearly."""
+                Examples:
+                User: "Turn on WiFi"
+                You: "Absolutely! I'll turn on WiFi for you right now. [ACTION: SYSTEM_ACTION|wifi|on]"
+
+                User: "Open YouTube"
+                You: "Great choice! Opening YouTube for you. [ACTION: LAUNCH_APP|YouTube]"
+
+                Be lively, conversational, and helpful. Make interactions feel natural and engaging!"""
     }
 
     /**
@@ -1417,38 +1574,214 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Manual activation for testing - simulates wake word detection and starts manual recording
+     * Start manual recording for continuous conversation (like Siri)
      */
-    fun manualVoiceActivation() {
-        Log.i("AURA_VOICE", "Manual voice activation triggered")
-        statusMessage = "Manual activation! Listening for your command..."
+    private fun startManualRecordingForConversation() {
+        if (isSpeaking || isRecording) {
+            Log.w("AURA_VOICE", "Cannot start recording: isSpeaking=$isSpeaking, isRecording=$isRecording")
+            return
+        }
         
-        if (isRecording) {
-            // Stop manual recording
-            val stopIntent = Intent(this, AudioRecorderService::class.java)
-            stopService(stopIntent)
-            isRecording = false
-            statusMessage = "Recording stopped. Processing..."
-        } else {
-            // Start manual recording 
-            if (isMicPermissionGranted()) {
-                val recordIntent = Intent(this, AudioRecorderService::class.java)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    startForegroundService(recordIntent)
-                } else {
-                    startService(recordIntent)
-                }
-                isRecording = true
-                statusMessage = "Recording... Speak your command"
-                speakWithPlayAITts("I'm listening. Please speak your command.", selectedVoice, ttsSpeed)
+        if (!isMicPermissionGranted()) {
+            statusMessage = "Microphone permission required"
+            speakWithPlayAITts("Please grant microphone permission to use voice commands.", selectedVoice, ttsSpeed)
+            return
+        }
+        
+        try {
+            Log.i("AURA_VOICE", "Starting conversation recording")
+            val recordIntent = Intent(this, AudioRecorderService::class.java)
+            
+            val componentName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(recordIntent)
             } else {
-                statusMessage = "Microphone permission required"
-                speakWithPlayAITts("Please grant microphone permission to use voice commands.", selectedVoice, ttsSpeed)
+                startService(recordIntent)
+            }
+            
+            if (componentName != null) {
+                isRecording = true
+                statusMessage = "🎤 Listening..."
+                userTranscription = "" // Clear previous transcription
+                Log.i("AURA_VOICE", "Conversation recording started successfully")
+            } else {
+                Log.e("AURA_VOICE", "Failed to start conversation recording service")
+                statusMessage = "Failed to start listening"
+            }
+            
+        } catch (e: Exception) {
+            Log.e("AURA_VOICE", "Exception starting conversation recording", e)
+            statusMessage = "Recording error"
+        }
+    }
+
+    /**
+     * Reset speaking state - force stop TTS and reset flags
+     */
+    private fun resetSpeakingState() {
+        Log.i("AURA_VOICE", "Force resetting speaking state")
+        isSpeaking = false
+        assistantSpeech = ""
+        speakingTimeoutHandler?.removeCallbacksAndMessages(null)
+        
+        // Stop any TTS that might still be playing
+        try {
+            tts?.stop()
+        } catch (e: Exception) {
+            Log.w("AURA_TTS", "Error stopping TTS: ${e.message}")
+        }
+    }
+    
+    /**
+     * Start speaking timeout - automatically reset speaking state after timeout
+     */
+    private fun startSpeakingTimeout() {
+        speakingTimeoutHandler?.removeCallbacksAndMessages(null)
+        speakingTimeoutHandler = Handler(Looper.getMainLooper())
+        speakingTimeoutHandler?.postDelayed({
+            if (isSpeaking) {
+                Log.w("AURA_VOICE", "Speaking timeout reached, force resetting state")
+                resetSpeakingState()
+                statusMessage = "Ready to listen"
+            }
+        }, SPEAKING_TIMEOUT)
+    }
+
+    /**
+     * Process voice command with typing animation and conversation flow
+     */
+    private fun processVoiceCommandWithAnimation(command: String) {
+        if (command.isBlank()) return
+        
+        // Start typing animation
+        typingAnimation = ""
+        animateTyping(command) {
+            // After typing animation completes, process the command
+            processVoiceCommand(command)
+        }
+    }
+
+    /**
+     * Animate typing effect for user input
+     */
+    private fun animateTyping(text: String, onComplete: () -> Unit) {
+        var currentIndex = 0
+        val handler = Handler(Looper.getMainLooper())
+        
+        fun typeNextCharacter() {
+            if (currentIndex < text.length) {
+                typingAnimation = text.substring(0, currentIndex + 1)
+                currentIndex++
+                handler.postDelayed({ typeNextCharacter() }, 50) // 50ms delay between characters
+            } else {
+                // Typing complete, set final text and call completion
+                userTranscription = text
+                typingAnimation = ""
+                handler.postDelayed(onComplete, 300) // Small delay before processing
             }
         }
         
+        typeNextCharacter()
+    }
+
+    /**
+     * Manual activation for testing - simulates wake word detection and starts manual recording
+     */
+    fun manualVoiceActivation() {
+        Log.i("AURA_VOICE", "=== MANUAL VOICE ACTIVATION TRIGGERED ===")
+        Log.i("AURA_VOICE", "Current state - isRecording: $isRecording, isSpeaking: $isSpeaking, conversationMode: $conversationMode")
+        
+        if (isRecording) {
+            // Stop manual recording
+            Log.i("AURA_VOICE", "Stopping manual recording")
+            val stopIntent = Intent(this, AudioRecorderService::class.java)
+            stopService(stopIntent)
+            isRecording = false
+            statusMessage = "Processing..."
+            // Don't speak anything here to avoid interference
+        } else {
+            // Check if AURA is speaking and allow force stop
+            if (isSpeaking) {
+                Log.w("AURA_VOICE", "AURA is speaking - checking if we should force stop")
+                
+                // Check if speaking has been going on too long
+                val currentTime = System.currentTimeMillis()
+                if (speakingTimeoutHandler == null) {
+                    // If no timeout is set, it might be stuck - force reset
+                    Log.w("AURA_VOICE", "No speaking timeout set, forcing reset")
+                    resetSpeakingState()
+                } else {
+                    // Give user option to force stop speaking
+                    statusMessage = "AURA is speaking... Tap again to force stop"
+                    runOnUiThread {
+                        Toast.makeText(this, "AURA is speaking. Tap again to interrupt.", Toast.LENGTH_SHORT).show()
+                    }
+                    
+                    // Allow force stop after 2 seconds if user taps again
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        if (isSpeaking) {
+                            Log.i("AURA_VOICE", "Force stopping speaking state")
+                            resetSpeakingState()
+                        }
+                    }, 2000)
+                    return
+                }
+            }
+            
+            // Check permissions first
+            val micPermission = isMicPermissionGranted()
+            Log.i("AURA_VOICE", "Microphone permission granted: $micPermission")
+            if (!micPermission) {
+                statusMessage = "Microphone permission required"
+                speakWithPlayAITts("Please grant microphone permission to use voice commands.", selectedVoice, ttsSpeed)
+                return
+            }
+            
+            // Start conversation mode and manual recording 
+            try {
+                conversationMode = true
+                Log.i("AURA_VOICE", "Starting manual recording")
+                
+                // Clear any previous state
+                userTranscription = ""
+                statusMessage = "🎤 Starting recording..."
+                
+                val recordIntent = Intent(this, AudioRecorderService::class.java)
+                recordIntent.putExtra("isManualActivation", true)
+                
+                // Use the appropriate method based on Android version
+                val componentName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    Log.i("AURA_VOICE", "Using startForegroundService for Android O+")
+                    startForegroundService(recordIntent)
+                } else {
+                    Log.i("AURA_VOICE", "Using startService for older Android")
+                    startService(recordIntent)
+                }
+                
+                if (componentName != null) {
+                    isRecording = true
+                    statusMessage = "🎤 Listening... Speak now"
+                    Log.i("AURA_VOICE", "Recording service started successfully - componentName: $componentName")
+                } else {
+                    Log.e("AURA_VOICE", "Failed to start recording service - componentName is null")
+                    statusMessage = "Failed to start recording"
+                    runOnUiThread {
+                        Toast.makeText(this, "Failed to start recording service", Toast.LENGTH_SHORT).show()
+                    }
+                    speakWithPlayAITts("Sorry, I couldn't start the recording service. Please try again.", selectedVoice, ttsSpeed)
+                }
+                
+            } catch (e: Exception) {
+                Log.e("AURA_VOICE", "Exception starting recording service", e)
+                statusMessage = "Recording service error: ${e.message}"
+                runOnUiThread {
+                    Toast.makeText(this, "Recording error: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+                speakWithPlayAITts("Sorry, there was an error starting the recording. Please try again.", selectedVoice, ttsSpeed)
+            }
+        }
+        
+        // Ensure greeting has been given
         if (!hasGreeted && !isRecording) {
-            greetUserWithCompoundBeta()
             hasGreeted = true
         }
     }
