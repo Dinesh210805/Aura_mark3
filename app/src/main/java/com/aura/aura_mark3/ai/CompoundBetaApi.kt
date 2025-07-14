@@ -33,7 +33,7 @@ data class ToolFunction(
 )
 
 data class ExecutedTool(
-    val tool_call_id: String,
+    val toolCallId: String,
     val type: String,
     val function: ToolFunction,
     val result: String
@@ -42,7 +42,7 @@ data class ExecutedTool(
 data class CompoundRequest(
     val model: String, // "compound-beta" or "compound-beta-mini"
     val messages: List<CompoundMessage>,
-    val max_tokens: Int = 1024,
+    val maxTokens: Int = 1024,
     val temperature: Float = 0.7f,
     val stream: Boolean = false
 )
@@ -50,19 +50,19 @@ data class CompoundRequest(
 data class CompoundChoice(
     val index: Int,
     val message: CompoundMessage,
-    val finish_reason: String?,
-    val executed_tools: List<ExecutedTool>? = null
+    val finishReason: String?,
+    val executedTools: List<ExecutedTool>? = null
 )
 
 data class CompoundUsage(
-    val prompt_tokens: Int,
-    val completion_tokens: Int,
-    val total_tokens: Int
+    val promptTokens: Int,
+    val completionTokens: Int,
+    val totalTokens: Int
 )
 
 data class CompoundResponse(
     val id: String,
-    val object: String,
+    val `object`: String,
     val created: Long,
     val model: String,
     val choices: List<CompoundChoice>,
@@ -86,23 +86,23 @@ interface CompoundBetaApi {
  * for complex agentic operations
  */
 fun provideCompoundBetaApi(): CompoundBetaApi {
-    val logging = HttpLoggingInterceptor().apply { 
-        level = HttpLoggingInterceptor.Level.BODY 
+    val logging = HttpLoggingInterceptor().apply {
+        level = HttpLoggingInterceptor.Level.BODY
     }
-    
+
     val client = OkHttpClient.Builder()
         .addInterceptor(logging)
         .connectTimeout(45, TimeUnit.SECONDS) // Increased for agentic operations
         .readTimeout(120, TimeUnit.SECONDS)   // Increased for web search/code execution
         .writeTimeout(45, TimeUnit.SECONDS)
         .build()
-        
+
     val retrofit = Retrofit.Builder()
         .baseUrl("https://api.groq.com/")
         .client(client)
         .addConverterFactory(GsonConverterFactory.create())
         .build()
-        
+
     return retrofit.create(CompoundBetaApi::class.java)
 }
 
@@ -111,7 +111,7 @@ fun provideCompoundBetaApi(): CompoundBetaApi {
  * Handles system prompts and conversation context
  */
 class AuraAgenticAssistant {
-    
+
     companion object {
         const val SYSTEM_PROMPT = """You are AURA (Autonomous UI Reader and Assistant), an advanced AI voice assistant that helps users interact with their Android devices through voice commands. You have access to real-time information through web search and can execute code for calculations.
 
@@ -133,20 +133,20 @@ Response guidelines:
 
 Always respond in a natural, friendly tone as a personal assistant would."""
     }
-    
+
     private val conversationHistory = mutableListOf<CompoundMessage>()
-    
+
     init {
         // Initialize with system prompt
         conversationHistory.add(CompoundMessage("system", SYSTEM_PROMPT))
     }
-    
+
     /**
      * Add user message to conversation history
      */
     fun addUserMessage(message: String) {
         conversationHistory.add(CompoundMessage("user", message))
-        
+
         // Keep conversation history manageable (last 10 exchanges)
         if (conversationHistory.size > 21) { // 1 system + 20 messages
             // Remove oldest user/assistant pair, keep system message
@@ -154,21 +154,21 @@ Always respond in a natural, friendly tone as a personal assistant would."""
             conversationHistory.removeAt(1)
         }
     }
-    
+
     /**
      * Add assistant response to conversation history
      */
     fun addAssistantMessage(message: String) {
         conversationHistory.add(CompoundMessage("assistant", message))
     }
-    
+
     /**
      * Get current conversation context
      */
     fun getConversationHistory(): List<CompoundMessage> {
         return conversationHistory.toList()
     }
-    
+
     /**
      * Clear conversation history except system prompt
      */
@@ -177,7 +177,7 @@ Always respond in a natural, friendly tone as a personal assistant would."""
         conversationHistory.clear()
         conversationHistory.add(systemPrompt)
     }
-    
+
     /**
      * Create request for compound-beta API
      */
@@ -186,11 +186,11 @@ Always respond in a natural, friendly tone as a personal assistant would."""
         useFullModel: Boolean = true
     ): CompoundRequest {
         addUserMessage(message)
-        
+
         return CompoundRequest(
             model = if (useFullModel) "compound-beta" else "compound-beta-mini",
             messages = conversationHistory,
-            max_tokens = 1024,
+            maxTokens = 1024,
             temperature = 0.7f
         )
     }

@@ -58,5 +58,11 @@
             android:name=".audio.AudioRecorderService"
             android:foregroundServiceType="microphone"
             android:exported="false" />
+
+        <!-- Enhanced Voice Service -->
+        <service
+            android:name=".audio.EnhancedVoiceService"
+            android:foregroundServiceType="microphone"
+            android:exported="false" />
     </application>
 </manifest>

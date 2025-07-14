@@ -146,7 +146,17 @@ class EnhancedVoiceService : Service() {
 
     @SuppressLint("MissingPermission")
     private fun startContinuousListening() {
-        if (isRunning.get()) return
+        if (isRunning.get()) {
+            Log.w("EnhancedVoiceService", "Service already running")
+            return
+        }
+        
+        // Check permissions first
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            Log.e("EnhancedVoiceService", "RECORD_AUDIO permission not granted")
+            broadcastListeningState(false, "stopped")
+            return
+        }
         
         try {
             val bufferSize = AudioRecord.getMinBufferSize(
@@ -154,6 +164,11 @@ class EnhancedVoiceService : Service() {
                 CHANNEL_CONFIG,
                 AUDIO_FORMAT
             ) * 2
+            
+            if (bufferSize <= 0) {
+                Log.e("EnhancedVoiceService", "Invalid buffer size: $bufferSize")
+                return
+            }
             
             audioRecord = AudioRecord(
                 AUDIO_SOURCE,
@@ -164,12 +179,22 @@ class EnhancedVoiceService : Service() {
             )
             
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-                Log.e("EnhancedVoiceService", "AudioRecord initialization failed")
+                Log.e("EnhancedVoiceService", "AudioRecord initialization failed, state: ${audioRecord?.state}")
+                audioRecord?.release()
+                audioRecord = null
+                broadcastListeningState(false, "stopped")
                 return
             }
             
             isRunning.set(true)
             audioRecord?.startRecording()
+            
+            // Verify recording started
+            if (audioRecord?.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                Log.e("EnhancedVoiceService", "AudioRecord failed to start recording, state: ${audioRecord?.recordingState}")
+                stopContinuousListening()
+                return
+            }
             
             // Start with wake word listening notification
             startForeground(NOTIFICATION_ID, buildNotification(true, "wake_word"))
@@ -177,10 +202,15 @@ class EnhancedVoiceService : Service() {
             
             recordingThread = Thread { processAudioStream() }.apply { start() }
             
-            Log.i("EnhancedVoiceService", "Continuous listening started")
+            Log.i("EnhancedVoiceService", "Continuous listening started successfully")
             
+        } catch (e: SecurityException) {
+            Log.e("EnhancedVoiceService", "Security exception in startContinuousListening", e)
+            broadcastListeningState(false, "stopped")
+            stopContinuousListening()
         } catch (e: Exception) {
             Log.e("EnhancedVoiceService", "Failed to start continuous listening", e)
+            broadcastListeningState(false, "stopped")
             stopContinuousListening()
         }
     }

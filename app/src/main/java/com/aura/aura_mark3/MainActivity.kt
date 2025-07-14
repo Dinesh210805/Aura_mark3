@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import com.aura.aura_mark3.ui.theme.Aura_mark3Theme
 import android.content.Intent
@@ -24,6 +27,9 @@ import com.aura.aura_mark3.ai.CompoundRequest
 import com.aura.aura_mark3.ai.CompoundMessage
 import com.aura.aura_mark3.ai.CompoundResponse
 import com.aura.aura_mark3.ai.provideCompoundBetaApi
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
 import com.aura.aura_mark3.ai.LlmMessage
 import com.aura.aura_mark3.ai.LlmRequest
 import com.aura.aura_mark3.ai.LlmResponse
@@ -186,11 +192,16 @@ class MainActivity : ComponentActivity() {
     private val transcriptionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val transcription = intent?.getStringExtra(AudioRecorderService.EXTRA_TRANSCRIPTION) ?: ""
-            Log.i("AURA_STT", "Transcription: $transcription")
+            Log.i("AURA_STT", "Transcription received: $transcription")
             userTranscription = transcription
             isRecording = false
             if (transcription.isNotBlank()) {
-                // Optionally trigger LLM or other logic here
+                // Process the voice command
+                statusMessage = "Processing your command..."
+                processVoiceCommand(transcription)
+            } else {
+                statusMessage = "No speech detected. Please try again."
+                speakWithPlayAITts("I didn't hear anything. Please try speaking again.", selectedVoice, ttsSpeed)
             }
         }
     }
@@ -618,6 +629,36 @@ class MainActivity : ComponentActivity() {
         speakWithPlayAITts("Voice assistant is now active. Say 'Hey Aura' when you need me.", selectedVoice, ttsSpeed)
     }
 
+    /**
+     * Fallback greeting for when Enhanced Voice Service may not be working
+     */
+    private fun performInitialGreeting() {
+        if (!hasGreeted) {
+            statusMessage = "Initializing AURA..."
+            speakWithPlayAITts("Hello! I'm AURA, your intelligent voice assistant. Tap the microphone to talk to me.", selectedVoice, ttsSpeed) {
+                hasGreeted = true
+                statusMessage = "Ready - Tap microphone or say 'Hey Aura'"
+            }
+        }
+    }
+
+    /**
+     * Diagnostic function to check system status
+     */
+    private fun performSystemDiagnostic(): String {
+        val diagnostics = mutableListOf<String>()
+        
+        diagnostics.add("TTS Ready: $ttsReady")
+        diagnostics.add("Mic Permission: ${isMicPermissionGranted()}")
+        diagnostics.add("Accessibility: ${isAccessibilityEnabled()}")
+        diagnostics.add("Voice Service Running: $isVoiceServiceRunning")
+        diagnostics.add("API Key Available: ${loadApiKey().isNotBlank()}")
+        
+        val result = diagnostics.joinToString(", ")
+        Log.i("AURA_DIAGNOSTIC", result)
+        return result
+    }
+
     private fun isMicPermissionGranted(): Boolean {
         return ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     }
@@ -632,6 +673,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        
+        // Initialize with a welcome status
+        statusMessage = "Initializing AURA voice assistant..."
+        
         screenshotHelper = ScreenshotHelper(this)
         prefs = getSharedPreferences("aura_prefs", MODE_PRIVATE)
         // Load persisted settings
@@ -733,15 +778,31 @@ class MainActivity : ComponentActivity() {
                 // Process any queued messages
                 processTtsQueue()
                 
-                // Start Enhanced Voice Service for continuous listening after TTS is ready
-                if (isMicPermissionGranted()) {
-                    startEnhancedVoiceService()
-                } else {
-                    statusMessage = "Microphone permission required for voice assistant"
-                }
+                // Give initial greeting
+                Handler(Looper.getMainLooper()).postDelayed({
+                    performInitialGreeting()
+                    // Start Enhanced Voice Service for continuous listening after greeting
+                    if (isMicPermissionGranted()) {
+                        startEnhancedVoiceService()
+                    } else {
+                        statusMessage = "Microphone permission required for voice assistant"
+                        speakWithPlayAITts("Please grant microphone permission to use voice commands.", selectedVoice, ttsSpeed)
+                    }
+                }, 1000) // Wait 1 second before greeting
             } else {
                 Log.e("AURA_TTS", "MainActivity TTS initialization failed with status: $status")
                 ttsReady = false
+                statusMessage = "TTS initialization failed"
+                performSystemDiagnostic()
+                // Try to start Enhanced Voice Service anyway
+                if (isMicPermissionGranted()) {
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        startEnhancedVoiceService()
+                        statusMessage = "Voice service ready (TTS unavailable)"
+                    }, 2000)
+                } else {
+                    statusMessage = "Microphone permission required"
+                }
             }
         }
 
@@ -787,16 +848,20 @@ class MainActivity : ComponentActivity() {
                         Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                             VoiceAssistantUI(
                                 modifier = Modifier.padding(innerPadding),
-                                isListening = isListeningForWakeWord || isRecordingCommand,
-                                listeningType = listeningType,
+                                isListening = isListeningForWakeWord || isRecordingCommand || isRecording,
+                                listeningType = when {
+                                    isRecording -> "manual"
+                                    isRecordingCommand -> "command"
+                                    isListeningForWakeWord -> "wake_word"
+                                    else -> "stopped"
+                                },
                                 audioLevel = currentAudioLevel,
                                 userTranscription = userTranscription,
                                 assistantSpeech = assistantSpeech,
                                 statusMessage = statusMessage,
                                 onManualRecord = { 
-                                    // Manual record for testing if needed
-                                    val intent = Intent(context, AudioRecorderService::class.java)
-                                    context.startForegroundService(intent)
+                                    // Manual activation for testing
+                                    manualVoiceActivation()
                                 },
                                 onSettings = { inSettings = true }
                             )
@@ -933,11 +998,22 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun speakWithPlayAITts(message: String, voice: String, speed: Float, onDone: (() -> Unit)? = null) {
-        if (!ttsFeedbackEnabled) return
+        if (!ttsFeedbackEnabled) {
+            onDone?.invoke()
+            return
+        }
 
         assistantSpeech = message // Always show the message in the caption bar
 
         val apiKey = loadApiKey()
+        if (apiKey.isBlank()) {
+            Log.w("AURA_TTS", "No API key found, falling back to local TTS")
+            speakIfReady(message)
+            assistantSpeech = ""
+            onDone?.invoke()
+            return
+        }
+
         val playAITtsApi = providePlayAITtsApi()
         val request = PlayAITtsRequest(
             input = message,
@@ -955,9 +1031,16 @@ class MainActivity : ComponentActivity() {
                             assistantSpeech = ""
                             onDone?.invoke()
                         }, onError = {
+                            Log.e("AURA_TTS", "Error playing PlayAI TTS audio, falling back to local TTS")
+                            speakIfReady(message)
                             assistantSpeech = ""
                             onDone?.invoke()
                         })
+                    } ?: run {
+                        Log.e("AURA_TTS", "PlayAI TTS response body is null")
+                        speakIfReady(message)
+                        assistantSpeech = ""
+                        onDone?.invoke()
                     }
                 } else {
                     Log.e("AURA_TTS", "PlayAI TTS API error: ${response.code()} ${response.message()}")
@@ -1064,8 +1147,10 @@ class MainActivity : ComponentActivity() {
         
         val apiKey = loadApiKey()
         if (apiKey.isBlank()) {
-            speakWithPlayAITts("Hello, Joyboy! I'm AURA, your voice assistant. How can I help you today?", selectedVoice, ttsSpeed)
-            isProcessingRequest = false
+            Log.w("AURA_LLM", "No API key found, using fallback greeting")
+            speakWithPlayAITts("Hello, Joyboy! I'm AURA, your voice assistant. How can I help you today?", selectedVoice, ttsSpeed) {
+                isProcessingRequest = false
+            }
             return
         }
         
@@ -1078,7 +1163,7 @@ class MainActivity : ComponentActivity() {
                 CompoundMessage(role = "system", content = systemPrompt),
                 CompoundMessage(role = "user", content = "Hello AURA, I just activated you with the wake word 'Hey Aura'")
             ),
-            max_tokens = 150,
+            maxTokens = 150,
             temperature = 0.8f
         )
         
@@ -1088,6 +1173,7 @@ class MainActivity : ComponentActivity() {
                     response.body()?.choices?.firstOrNull()?.message?.content ?: 
                     "Hello, Joyboy! I'm AURA, your intelligent voice assistant. How can I help you today?"
                 } else {
+                    Log.w("AURA_LLM", "Compound Beta API returned error: ${response.code()}")
                     "Hello, Joyboy! I'm AURA, your intelligent voice assistant. How can I help you today?"
                 }
                 
@@ -1135,7 +1221,7 @@ class MainActivity : ComponentActivity() {
         val request = CompoundRequest(
             model = "compound-beta",
             messages = messages,
-            max_tokens = 500,
+            maxTokens = 500,
             temperature = 0.7f
         )
         
@@ -1191,32 +1277,32 @@ class MainActivity : ComponentActivity() {
         
         return """You are AURA, an intelligent voice assistant for Android devices. You have access to real-world information via web search and can help with:
 
-DEVICE CONTROL ACTIONS:
-- System settings: WiFi, Bluetooth, brightness, volume
-- App control: open apps, navigate interfaces
-- Screen interaction: click, scroll, input text
+                DEVICE CONTROL ACTIONS:
+                - System settings: WiFi, Bluetooth, brightness, volume
+                - App control: open apps, navigate interfaces
+                - Screen interaction: click, scroll, input text
 
-INFORMATION ACCESS:
-- Web search for current information
-- Screen analysis and description
-- Real-time data access
+                INFORMATION ACCESS:
+                - Web search for current information
+                - Screen analysis and description
+                - Real-time data access
 
-CURRENT CONTEXT:
-- $currentApp
-- $screenInfo
+                CURRENT CONTEXT:
+                - $currentApp
+                - $screenInfo
 
-When the user asks for device actions, respond with natural language AND include specific action commands in this format:
-[ACTION: type|parameter1|parameter2]
+                When the user asks for device actions, respond with natural language AND include specific action commands in this format:
+                [ACTION: type|parameter1|parameter2]
 
-Available action types:
-- SYSTEM_ACTION|bluetooth|on/off
-- SYSTEM_ACTION|wifi|on/off  
-- SYSTEM_ACTION|brightness|0-255
-- LAUNCH_APP|app_name
-- TAKE_SCREENSHOT
-- VLM_ACTION|query|action_type (for screen interaction)
+                Available action types:
+                - SYSTEM_ACTION|bluetooth|on/off
+                - SYSTEM_ACTION|wifi|on/off  
+                - SYSTEM_ACTION|brightness|0-255
+                - LAUNCH_APP|app_name
+                - TAKE_SCREENSHOT
+                - VLM_ACTION|query|action_type (for screen interaction)
 
-Be conversational, helpful, and use your real-world data access when needed. Always acknowledge the user's request clearly."""
+                Be conversational, helpful, and use your real-world data access when needed. Always acknowledge the user's request clearly."""
     }
 
     /**
@@ -1273,265 +1359,97 @@ Be conversational, helpful, and use your real-world data access when needed. Alw
      * Start Enhanced Voice Service for continuous listening
      */
     private fun startEnhancedVoiceService() {
-        val serviceIntent = Intent(this, EnhancedVoiceService::class.java)
-        startForegroundService(serviceIntent)
-        isVoiceServiceRunning = true
-        statusMessage = "Starting voice service..."
+        try {
+            if (isVoiceServiceRunning) {
+                Log.i("AURA_VOICE", "Enhanced Voice Service already running")
+                return
+            }
+            
+            val serviceIntent = Intent(this, EnhancedVoiceService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val result = startForegroundService(serviceIntent)
+                Log.i("AURA_VOICE", "Enhanced Voice Service startForegroundService result: $result")
+            } else {
+                val result = startService(serviceIntent)
+                Log.i("AURA_VOICE", "Enhanced Voice Service startService result: $result")
+            }
+            isVoiceServiceRunning = true
+            statusMessage = "Voice service starting..."
+            Log.i("AURA_VOICE", "Enhanced Voice Service start requested")
+            
+            // Set a timeout to check if service actually started
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (isVoiceServiceRunning && statusMessage.contains("starting")) {
+                    statusMessage = "Listening for 'Hey Aura'..."
+                    Log.i("AURA_VOICE", "Voice service appears to be running")
+                }
+            }, 3000)
+            
+            // Set a longer timeout to provide fallback if service doesn't respond
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (statusMessage.contains("starting") || statusMessage.contains("Voice service")) {
+                    statusMessage = "Voice assistant ready - Tap microphone to talk"
+                    Log.w("AURA_VOICE", "Enhanced Voice Service may not be responding, switching to manual mode")
+                    speakWithPlayAITts("Voice assistant ready. Tap the microphone button to talk to me.", selectedVoice, ttsSpeed)
+                }
+            }, 8000)
+        } catch (e: Exception) {
+            Log.e("AURA_VOICE", "Failed to start Enhanced Voice Service", e)
+            isVoiceServiceRunning = false
+            statusMessage = "Voice service failed to start"
+            speakWithPlayAITts("Voice service unavailable. You can still use manual controls.", selectedVoice, ttsSpeed)
+        }
     }
 
     /**
      * Stop Enhanced Voice Service
      */
     private fun stopEnhancedVoiceService() {
-        val serviceIntent = Intent(this, EnhancedVoiceService::class.java)
-        stopService(serviceIntent)
-        isVoiceServiceRunning = false
-        statusMessage = "Voice service stopped"
-    }
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(Icons.Default.CameraAlt, contentDescription = "Screenshot")
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("Screenshot", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-
-                // VLM Demo Button
-                OutlinedCard(
-                    onClick = onVlmDemo,
-                    modifier = Modifier.weight(1f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(Icons.Default.Visibility, contentDescription = "VLM Demo")
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("VLM Demo", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-
-                // Settings Button
-                OutlinedCard(
-                    onClick = onSettings,
-                    modifier = Modifier.weight(1f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings")
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("Settings", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
-
-            // Screenshot display
-            screenshotBitmap?.let { bitmap ->
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Text(
-                            text = "📸 Screenshot",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Image(
-                            bitmap = bitmap.asImageBitmap(),
-                            contentDescription = "Screenshot",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(200.dp)
-                                .clip(RoundedCornerShape(8.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-                    }
-                }
-            }
-
-            // Transcription display
-            if (transcription.isNotBlank()) {
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Default.Mic,
-                                contentDescription = "Transcription",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Transcription",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = transcription,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-            }
-
-            // LLM Response display
-            if (llmResponse.isNotBlank()) {
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Default.SmartToy,
-                                contentDescription = "AI Response",
-                                tint = MaterialTheme.colorScheme.secondary
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "AI Response",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = llmResponse,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-            }
-
-            // Current Step display
-            if (currentStep.isNotBlank()) {
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Default.PlayArrow,
-                                contentDescription = "Current Step",
-                                tint = MaterialTheme.colorScheme.tertiary
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Current Step",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = currentStep,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-            }
-
-            // Action Result display
-            if (actionResultMessage.isNotBlank()) {
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Default.TouchApp,
-                                contentDescription = "Action Result",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Action Result",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = actionResultMessage,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-            }
-
-            // VLM Result display
-            if (vlmResultMessage.isNotBlank()) {
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Default.Psychology,
-                                contentDescription = "VLM Result",
-                                tint = MaterialTheme.colorScheme.secondary
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "VLM Result",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = vlmResultMessage,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-            }
-
-            // Bottom spacer
-            Spacer(modifier = Modifier.height(16.dp))
+        try {
+            val serviceIntent = Intent(this, EnhancedVoiceService::class.java)
+            stopService(serviceIntent)
+            isVoiceServiceRunning = false
+            statusMessage = "Voice service stopped"
+            Log.i("AURA_VOICE", "Enhanced Voice Service stopped")
+        } catch (e: Exception) {
+            Log.e("AURA_VOICE", "Error stopping Enhanced Voice Service", e)
         }
-        // Persistent caption bar at the bottom
-        // CaptionBar(
-        //     userTranscription = userTranscription,
-        //     assistantSpeech = assistantSpeech,
-        //     modifier = Modifier.align(Alignment.BottomCenter)
-        // )
+    }
+
+    /**
+     * Manual activation for testing - simulates wake word detection and starts manual recording
+     */
+    fun manualVoiceActivation() {
+        Log.i("AURA_VOICE", "Manual voice activation triggered")
+        statusMessage = "Manual activation! Listening for your command..."
+        
+        if (isRecording) {
+            // Stop manual recording
+            val stopIntent = Intent(this, AudioRecorderService::class.java)
+            stopService(stopIntent)
+            isRecording = false
+            statusMessage = "Recording stopped. Processing..."
+        } else {
+            // Start manual recording 
+            if (isMicPermissionGranted()) {
+                val recordIntent = Intent(this, AudioRecorderService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(recordIntent)
+                } else {
+                    startService(recordIntent)
+                }
+                isRecording = true
+                statusMessage = "Recording... Speak your command"
+                speakWithPlayAITts("I'm listening. Please speak your command.", selectedVoice, ttsSpeed)
+            } else {
+                statusMessage = "Microphone permission required"
+                speakWithPlayAITts("Please grant microphone permission to use voice commands.", selectedVoice, ttsSpeed)
+            }
+        }
+        
+        if (!hasGreeted && !isRecording) {
+            greetUserWithCompoundBeta()
+            hasGreeted = true
+        }
     }
 }

@@ -214,12 +214,14 @@ private fun VoiceVisualization(
     val primaryColor = when (listeningType) {
         "wake_word" -> Color(0xFF2196F3) // Blue for wake word listening
         "command" -> Color(0xFF4CAF50)   // Green for command recording
+        "manual" -> Color(0xFFFF9800)    // Orange for manual recording
         else -> Color(0xFF757575)        // Gray for inactive
     }
 
     val secondaryColor = when (listeningType) {
         "wake_word" -> Color(0xFF64FFDA)
         "command" -> Color(0xFF81C784)
+        "manual" -> Color(0xFFFFB74D)
         else -> Color(0xFFBDBDBD)
     }
 
@@ -265,6 +267,7 @@ private fun VoiceVisualization(
                 imageVector = when (listeningType) {
                     "wake_word" -> Icons.Default.Hearing
                     "command" -> Icons.Default.Mic
+                    "manual" -> Icons.Default.RecordVoiceOver
                     else -> Icons.Default.MicOff
                 },
                 contentDescription = "Voice Status",
@@ -316,12 +319,14 @@ private fun StatusDisplay(
         !isListening -> "Voice assistant ready"
         listeningType == "wake_word" -> "Say \"Hey Aura\" to start"
         listeningType == "command" -> "Listening... speak your command"
+        listeningType == "manual" -> "Recording... speak now"
         else -> "Processing..."
     }
 
     val statusColor = when (listeningType) {
         "wake_word" -> Color(0xFF64FFDA)
         "command" -> Color(0xFF4CAF50)
+        "manual" -> Color(0xFFFF9800)
         else -> Color(0xFFBDBDBD)
     }
 
@@ -453,19 +458,19 @@ private fun BottomControls(
                 .height(if (isTablet) 56.dp else 48.dp)
                 .widthIn(min = if (isTablet) 200.dp else 160.dp),
             colors = ButtonDefaults.filledTonalButtonColors(
-                containerColor = Color(0xFF64FFDA).copy(alpha = 0.2f),
-                contentColor = Color(0xFF64FFDA)
+                containerColor = if (isListening) Color(0xFFFF5722).copy(alpha = 0.3f) else Color(0xFF64FFDA).copy(alpha = 0.2f),
+                contentColor = if (isListening) Color(0xFFFF5722) else Color(0xFF64FFDA)
             ),
             shape = RoundedCornerShape(24.dp)
         ) {
             Icon(
                 imageVector = if (isListening) Icons.Default.Stop else Icons.Default.Mic,
-                contentDescription = if (isListening) "Stop recording" else "Manual record",
+                contentDescription = if (isListening) "Stop recording" else "Start manual recording",
                 modifier = Modifier.size(if (isTablet) 24.dp else 20.dp)
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = if (isListening) "Stop" else "Manual Record",
+                text = if (isListening) "Stop Recording" else "Tap to Talk",
                 fontSize = if (isTablet) 16.sp else 14.sp,
                 fontWeight = FontWeight.SemiBold
             )
