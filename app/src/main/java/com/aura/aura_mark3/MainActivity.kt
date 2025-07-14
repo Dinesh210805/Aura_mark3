@@ -18,12 +18,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import com.aura.aura_mark3.audio.AudioRecorderService
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.IntentFilter
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import com.aura.aura_mark3.audio.EnhancedVoiceService
+import com.aura.aura_mark3.ai.CompoundBetaApi
+import com.aura.aura_mark3.ai.CompoundRequest
+import com.aura.aura_mark3.ai.CompoundMessage
+import com.aura.aura_mark3.ai.CompoundResponse
+import com.aura.aura_mark3.ai.provideCompoundBetaApi
 import com.aura.aura_mark3.ai.LlmMessage
 import com.aura.aura_mark3.ai.LlmRequest
 import com.aura.aura_mark3.ai.LlmResponse
@@ -47,6 +47,7 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import java.io.FileOutputStream
 import com.aura.aura_mark3.ui.SettingsScreen
+import com.aura.aura_mark3.ui.VoiceAssistantUI
 import android.content.SharedPreferences
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.Image
@@ -95,6 +96,7 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.runtime.mutableStateOf
 import com.aura.aura_mark3.ui.CaptionBar
 import androidx.compose.ui.platform.LocalContext
 
@@ -134,6 +136,17 @@ class MainActivity : ComponentActivity() {
     private var assistantSpeech by mutableStateOf("")
     private var statusMessage by mutableStateOf("")
 
+    // Enhanced Voice Service state variables
+    private var isVoiceServiceRunning by mutableStateOf(false)
+    private var isListeningForWakeWord by mutableStateOf(false)
+    private var isRecordingCommand by mutableStateOf(false)
+    private var currentAudioLevel by mutableStateOf(0)
+    private var listeningType by mutableStateOf("stopped") // "wake_word", "command", "stopped"
+    
+    // Conversation state for advanced voice assistant
+    private var conversationHistory = mutableListOf<CompoundMessage>()
+    private var isProcessingRequest by mutableStateOf(false)
+    private var hasGreeted by mutableStateOf(false)
 
     // Modern Activity Result API launcher
     private val screenshotResultLauncher: ActivityResultLauncher<Intent> =
@@ -191,6 +204,67 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Enhanced Voice Service receivers
+    private val wakeWordReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == EnhancedVoiceService.ACTION_WAKE_WORD_DETECTED) {
+                Log.i("AURA_WAKE", "Wake word detected - starting conversation")
+                statusMessage = "Wake word detected! Listening for your command..."
+                if (!hasGreeted) {
+                    greetUserWithCompoundBeta()
+                    hasGreeted = true
+                } else {
+                    speakWithPlayAITts("Yes, I'm listening. How can I help you?", selectedVoice, ttsSpeed)
+                }
+            }
+        }
+    }
+
+    private val voiceTranscriptionReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == EnhancedVoiceService.ACTION_VOICE_TRANSCRIPTION) {
+                val transcription = intent.getStringExtra(EnhancedVoiceService.EXTRA_TRANSCRIPTION) ?: ""
+                Log.i("AURA_VOICE", "Voice command received: $transcription")
+                userTranscription = transcription
+                if (transcription.isNotBlank()) {
+                    processVoiceCommand(transcription)
+                }
+            }
+        }
+    }
+
+    private val listeningStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == EnhancedVoiceService.ACTION_LISTENING_STATE) {
+                isListeningForWakeWord = intent.getBooleanExtra(EnhancedVoiceService.EXTRA_IS_LISTENING, false)
+                listeningType = intent.getStringExtra(EnhancedVoiceService.EXTRA_LISTENING_TYPE) ?: "stopped"
+                
+                when (listeningType) {
+                    "wake_word" -> {
+                        statusMessage = "Listening for 'Hey Aura'..."
+                        isRecordingCommand = false
+                    }
+                    "command" -> {
+                        statusMessage = "Recording your command..."
+                        isRecordingCommand = true
+                    }
+                    "stopped" -> {
+                        statusMessage = "Voice service stopped"
+                        isRecordingCommand = false
+                    }
+                }
+            }
+        }
+    }
+
+    private val audioLevelReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == EnhancedVoiceService.ACTION_AUDIO_LEVEL) {
+                currentAudioLevel = intent.getIntExtra(EnhancedVoiceService.EXTRA_AUDIO_LEVEL, 0)
+            }
+        }
+    }
+
     private fun startActionQueue(actions: List<AuraAction>) {
         actionQueue.clear()
         actionQueue.addAll(actions)
@@ -217,11 +291,12 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Start the STT service and update UI state for continuous listening.
+     * Note: Enhanced Voice Service handles continuous listening automatically.
      */
     private fun startListeningForCommand() {
-        isRecording = true
-        val intent = Intent(this, AudioRecorderService::class.java)
-        startForegroundService(intent)
+        // Enhanced Voice Service automatically handles wake word detection and command recording
+        // This method is kept for compatibility but the actual listening is managed by EnhancedVoiceService
+        statusMessage = "Ready for voice commands. Say 'Hey Aura' to start."
     }
 
     private fun executeAction(action: AuraAction) {
@@ -531,11 +606,16 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Public function to greet the user dynamically and start listening.
+     * Now uses Enhanced Voice Service for continuous listening.
      */
     fun startDynamicVoiceAssistant() {
-        greetUserWithLlm {
-            startListeningForCommand()
+        // Enhanced Voice Service handles continuous listening
+        // Just ensure the service is running and give user feedback
+        if (!isVoiceServiceRunning && isMicPermissionGranted()) {
+            startEnhancedVoiceService()
         }
+        statusMessage = "Voice assistant active. Say 'Hey Aura' to start."
+        speakWithPlayAITts("Voice assistant is now active. Say 'Hey Aura' when you need me.", selectedVoice, ttsSpeed)
     }
 
     private fun isMicPermissionGranted(): Boolean {
@@ -585,6 +665,26 @@ class MainActivity : ComponentActivity() {
                 IntentFilter(com.aura.aura_mark3.accessibility.AuraAccessibilityService.ACTION_FOREGROUND_PACKAGE),
                 Context.RECEIVER_NOT_EXPORTED
             )
+            registerReceiver(
+                wakeWordReceiver,
+                IntentFilter(EnhancedVoiceService.ACTION_WAKE_WORD_DETECTED),
+                Context.RECEIVER_NOT_EXPORTED
+            )
+            registerReceiver(
+                voiceTranscriptionReceiver,
+                IntentFilter(EnhancedVoiceService.ACTION_VOICE_TRANSCRIPTION),
+                Context.RECEIVER_NOT_EXPORTED
+            )
+            registerReceiver(
+                listeningStateReceiver,
+                IntentFilter(EnhancedVoiceService.ACTION_LISTENING_STATE),
+                Context.RECEIVER_NOT_EXPORTED
+            )
+            registerReceiver(
+                audioLevelReceiver,
+                IntentFilter(EnhancedVoiceService.ACTION_AUDIO_LEVEL),
+                Context.RECEIVER_NOT_EXPORTED
+            )
         } else {
             @Suppress("UnspecifiedRegisterReceiverFlag")
             registerReceiver(
@@ -601,6 +701,26 @@ class MainActivity : ComponentActivity() {
                 foregroundPackageReceiver,
                 IntentFilter(com.aura.aura_mark3.accessibility.AuraAccessibilityService.ACTION_FOREGROUND_PACKAGE)
             )
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(
+                wakeWordReceiver,
+                IntentFilter(EnhancedVoiceService.ACTION_WAKE_WORD_DETECTED)
+            )
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(
+                voiceTranscriptionReceiver,
+                IntentFilter(EnhancedVoiceService.ACTION_VOICE_TRANSCRIPTION)
+            )
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(
+                listeningStateReceiver,
+                IntentFilter(EnhancedVoiceService.ACTION_LISTENING_STATE)
+            )
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(
+                audioLevelReceiver,
+                IntentFilter(EnhancedVoiceService.ACTION_AUDIO_LEVEL)
+            )
         }
 
         // Initialize TTS
@@ -612,6 +732,13 @@ class MainActivity : ComponentActivity() {
 
                 // Process any queued messages
                 processTtsQueue()
+                
+                // Start Enhanced Voice Service for continuous listening after TTS is ready
+                if (isMicPermissionGranted()) {
+                    startEnhancedVoiceService()
+                } else {
+                    statusMessage = "Microphone permission required for voice assistant"
+                }
             } else {
                 Log.e("AURA_TTS", "MainActivity TTS initialization failed with status: $status")
                 ttsReady = false
@@ -658,34 +785,20 @@ class MainActivity : ComponentActivity() {
                 } else {
                     Box(modifier = Modifier.fillMaxSize()) {
                         Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                            AudioRecorderControls(
+                            VoiceAssistantUI(
                                 modifier = Modifier.padding(innerPadding),
-                                onStart = { startDynamicVoiceAssistant() },
-                                onStop = {
-                                    isRecording = false
-                                    speakWithPlayAITts("Stopped listening.", selectedVoice, ttsSpeed)
-                                    val intent = Intent(context, AudioRecorderService::class.java)
-                                    context.stopService(intent)
-                                },
-                                transcription = userTranscription,
-                                llmResponse = llmResponse,
-                                actionResultMessage = actionResultMessage,
-                                currentStep = currentStep,
-                                onScreenshot = {
-                                    screenshotHelper.requestScreenshotPermission()
-                                },
-                                screenshotBitmap = screenshotBitmap,
-                                onVlmDemo = {
-                                    screenshotHelper.requestScreenshotPermission()
-                                    vlmResultMessage = "Requesting screenshot for VLM..."
-                                },
-                                vlmResultMessage = vlmResultMessage,
-                                onSettings = { inSettings = true },
-                                isRecording = isRecording,
-                                isExecutingActions = isExecutingActions,
+                                isListening = isListeningForWakeWord || isRecordingCommand,
+                                listeningType = listeningType,
+                                audioLevel = currentAudioLevel,
                                 userTranscription = userTranscription,
                                 assistantSpeech = assistantSpeech,
-                                statusMessage = statusMessage
+                                statusMessage = statusMessage,
+                                onManualRecord = { 
+                                    // Manual record for testing if needed
+                                    val intent = Intent(context, AudioRecorderService::class.java)
+                                    context.startForegroundService(intent)
+                                },
+                                onSettings = { inSettings = true }
                             )
                         }
                         // Only one CaptionBar at the bottom, animated
@@ -924,194 +1037,257 @@ class MainActivity : ComponentActivity() {
             unregisterReceiver(transcriptionReceiver)
             unregisterReceiver(actionResultReceiver)
             unregisterReceiver(foregroundPackageReceiver)
+            unregisterReceiver(wakeWordReceiver)
+            unregisterReceiver(voiceTranscriptionReceiver)
+            unregisterReceiver(listeningStateReceiver)
+            unregisterReceiver(audioLevelReceiver)
         } catch (e: Exception) {
             Log.e("AURA_MAIN", "Error unregistering receivers: ", e)
         }
+        
+        // Stop Enhanced Voice Service
+        if (isVoiceServiceRunning) {
+            stopEnhancedVoiceService()
+        }
+        
         tts?.shutdown()
     }
-}
 
-@Composable
-fun AudioRecorderControls(
-    modifier: Modifier = Modifier,
-    onStart: () -> Unit,
-    onStop: () -> Unit,
-    transcription: String,
-    llmResponse: String,
-    actionResultMessage: String,
-    currentStep: String,
-    onScreenshot: () -> Unit,
-    screenshotBitmap: Bitmap?,
-    onVlmDemo: () -> Unit,
-    vlmResultMessage: String,
-    onSettings: () -> Unit,
-    isRecording: Boolean,
-    isExecutingActions: Boolean,
-    userTranscription: String,
-    assistantSpeech: String,
-    statusMessage: String
-) {
-    val scrollState = rememberScrollState()
+    /**
+     * Enhanced greeting using Compound Beta API with real-world awareness
+     */
+    private fun greetUserWithCompoundBeta() {
+        if (isProcessingRequest) return
+        
+        isProcessingRequest = true
+        assistantSpeech = "Initializing AURA..."
+        
+        val apiKey = loadApiKey()
+        if (apiKey.isBlank()) {
+            speakWithPlayAITts("Hello, Joyboy! I'm AURA, your voice assistant. How can I help you today?", selectedVoice, ttsSpeed)
+            isProcessingRequest = false
+            return
+        }
+        
+        val compoundApi = provideCompoundBetaApi()
+        val systemPrompt = """You are AURA, an advanced voice assistant for Joyboy. You have access to real-world information and can help with device control, app management, web search, and more. Greet Joyboy warmly and mention your capabilities briefly."""
+        
+        val request = CompoundRequest(
+            model = "compound-beta",
+            messages = listOf(
+                CompoundMessage(role = "system", content = systemPrompt),
+                CompoundMessage(role = "user", content = "Hello AURA, I just activated you with the wake word 'Hey Aura'")
+            ),
+            max_tokens = 150,
+            temperature = 0.8f
+        )
+        
+        compoundApi.chatCompletion(apiKey, request).enqueue(object : Callback<CompoundResponse> {
+            override fun onResponse(call: Call<CompoundResponse>, response: Response<CompoundResponse>) {
+                val reply = if (response.isSuccessful) {
+                    response.body()?.choices?.firstOrNull()?.message?.content ?: 
+                    "Hello, Joyboy! I'm AURA, your intelligent voice assistant. How can I help you today?"
+                } else {
+                    "Hello, Joyboy! I'm AURA, your intelligent voice assistant. How can I help you today?"
+                }
+                
+                conversationHistory.add(CompoundMessage(role = "assistant", content = reply))
+                speakWithPlayAITts(reply, selectedVoice, ttsSpeed) {
+                    isProcessingRequest = false
+                }
+            }
+            
+            override fun onFailure(call: Call<CompoundResponse>, t: Throwable) {
+                Log.e("AURA_LLM", "Compound Beta greeting failed", t)
+                speakWithPlayAITts("Hello, Joyboy! I'm AURA, your intelligent voice assistant. How can I help you today?", selectedVoice, ttsSpeed) {
+                    isProcessingRequest = false
+                }
+            }
+        })
+    }
 
-    Box(modifier = modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp)
-                .verticalScroll(scrollState),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // Chat bubbles for user, assistant, and status
-            if (userTranscription.isNotBlank()) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD)),
-                    shape = RoundedCornerShape(16.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("You:", fontWeight = FontWeight.Bold, color = Color(0xFF1976D2))
-                        Spacer(Modifier.height(4.dp))
-                        Text(userTranscription, color = Color(0xFF1976D2))
+    /**
+     * Process voice commands using Compound Beta API with real-world data access
+     */
+    private fun processVoiceCommand(command: String) {
+        if (isProcessingRequest) return
+        
+        isProcessingRequest = true
+        statusMessage = "Processing your request..."
+        assistantSpeech = "Thinking..."
+        
+        val apiKey = loadApiKey()
+        if (apiKey.isBlank()) {
+            speakWithPlayAITts("I'm sorry, I can't process requests without an API key.", selectedVoice, ttsSpeed)
+            isProcessingRequest = false
+            return
+        }
+        
+        conversationHistory.add(CompoundMessage(role = "user", content = command))
+        val compoundApi = provideCompoundBetaApi()
+        val systemPrompt = buildSystemPromptWithContext()
+        
+        val messages = mutableListOf<CompoundMessage>().apply {
+            add(CompoundMessage(role = "system", content = systemPrompt))
+            addAll(conversationHistory.takeLast(8))
+        }
+        
+        val request = CompoundRequest(
+            model = "compound-beta",
+            messages = messages,
+            max_tokens = 500,
+            temperature = 0.7f
+        )
+        
+        compoundApi.chatCompletion(apiKey, request).enqueue(object : Callback<CompoundResponse> {
+            override fun onResponse(call: Call<CompoundResponse>, response: Response<CompoundResponse>) {
+                if (response.isSuccessful) {
+                    val reply = response.body()?.choices?.firstOrNull()?.message?.content
+                    if (!reply.isNullOrBlank()) {
+                        conversationHistory.add(CompoundMessage(role = "assistant", content = reply))
+                        parseAndExecuteActions(reply)
+                        speakWithPlayAITts(reply, selectedVoice, ttsSpeed) {
+                            isProcessingRequest = false
+                            statusMessage = "Ready for next command"
+                        }
+                    } else {
+                        fallbackResponse()
+                    }
+                } else {
+                    Log.e("AURA_LLM", "Compound Beta API error: ${response.code()}")
+                    fallbackResponse()
+                }
+            }
+            
+            override fun onFailure(call: Call<CompoundResponse>, t: Throwable) {
+                Log.e("AURA_LLM", "Compound Beta API call failed", t)
+                fallbackResponse()
+            }
+        })
+    }
+
+    private fun fallbackResponse() {
+        speakWithPlayAITts("I'm sorry, I couldn't process that request. Please try again.", selectedVoice, ttsSpeed) {
+            isProcessingRequest = false
+            statusMessage = "Ready for next command"
+        }
+    }
+
+    /**
+     * Build context-aware system prompt with current app and screen information
+     */
+    private fun buildSystemPromptWithContext(): String {
+        val currentApp = if (currentForegroundPackage.isNotBlank()) {
+            "Currently active app: $currentForegroundPackage"
+        } else {
+            "No app information available"
+        }
+        
+        val screenInfo = if (latestScreenDescription.isNotBlank()) {
+            "Latest screen description: $latestScreenDescription"
+        } else {
+            "No screen information available"
+        }
+        
+        return """You are AURA, an intelligent voice assistant for Android devices. You have access to real-world information via web search and can help with:
+
+DEVICE CONTROL ACTIONS:
+- System settings: WiFi, Bluetooth, brightness, volume
+- App control: open apps, navigate interfaces
+- Screen interaction: click, scroll, input text
+
+INFORMATION ACCESS:
+- Web search for current information
+- Screen analysis and description
+- Real-time data access
+
+CURRENT CONTEXT:
+- $currentApp
+- $screenInfo
+
+When the user asks for device actions, respond with natural language AND include specific action commands in this format:
+[ACTION: type|parameter1|parameter2]
+
+Available action types:
+- SYSTEM_ACTION|bluetooth|on/off
+- SYSTEM_ACTION|wifi|on/off  
+- SYSTEM_ACTION|brightness|0-255
+- LAUNCH_APP|app_name
+- TAKE_SCREENSHOT
+- VLM_ACTION|query|action_type (for screen interaction)
+
+Be conversational, helpful, and use your real-world data access when needed. Always acknowledge the user's request clearly."""
+    }
+
+    /**
+     * Parse assistant response for action commands and execute them
+     */
+    private fun parseAndExecuteActions(response: String) {
+        val actionPattern = Regex("\\[ACTION:\\s*([^\\]]+)\\]")
+        val matches = actionPattern.findAll(response)
+        
+        val actions = mutableListOf<AuraAction>()
+        for (match in matches) {
+            val actionString = match.groupValues[1]
+            val parts = actionString.split("|")
+            
+            when (parts[0].trim().uppercase()) {
+                "SYSTEM_ACTION" -> {
+                    if (parts.size >= 3) {
+                        actions.add(AuraAction(
+                            action = "SYSTEM_ACTION",
+                            label = parts[1].trim(),
+                            text = parts[2].trim()
+                        ))
+                    }
+                }
+                "LAUNCH_APP" -> {
+                    if (parts.size >= 2) {
+                        actions.add(AuraAction(
+                            action = "LAUNCH_APP",
+                            label = parts[1].trim()
+                        ))
+                    }
+                }
+                "TAKE_SCREENSHOT" -> {
+                    actions.add(AuraAction(action = "TAKE_SCREENSHOT"))
+                }
+                "VLM_ACTION" -> {
+                    if (parts.size >= 3) {
+                        actions.add(AuraAction(
+                            action = "VLM_ACTION",
+                            query = parts[1].trim(),
+                            text = parts[2].trim()
+                        ))
                     }
                 }
             }
-            if (assistantSpeech.isNotBlank()) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0)),
-                    shape = RoundedCornerShape(16.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Assistant:", fontWeight = FontWeight.Bold, color = Color(0xFFF57C00))
-                        Spacer(Modifier.height(4.dp))
-                        Text(assistantSpeech, color = Color(0xFFF57C00))
-                    }
-                }
-            }
-            if (statusMessage.isNotBlank()) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
-                    shape = RoundedCornerShape(16.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Status:", fontWeight = FontWeight.Bold, color = Color(0xFF388E3C))
-                        Spacer(Modifier.height(4.dp))
-                        Text(statusMessage, color = Color(0xFF388E3C))
-                    }
-                }
-            }
+        }
+        
+        if (actions.isNotEmpty()) {
+            startActionQueue(actions)
+        }
+    }
 
-            // Header
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.primaryContainer,
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "AURA Assistant",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        text = "Voice-Controlled AI Assistant",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
-            }
+    /**
+     * Start Enhanced Voice Service for continuous listening
+     */
+    private fun startEnhancedVoiceService() {
+        val serviceIntent = Intent(this, EnhancedVoiceService::class.java)
+        startForegroundService(serviceIntent)
+        isVoiceServiceRunning = true
+        statusMessage = "Starting voice service..."
+    }
 
-            // Status indicator
-            if (isRecording || isExecutingActions) {
-                val statusColor by animateColorAsState(
-                    targetValue = if (isRecording) Color.Red else Color.Green,
-                    animationSpec = tween(300)
-                )
-
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.elevatedCardColors(
-                        containerColor = statusColor.copy(alpha = 0.1f)
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        LinearProgressIndicator(
-                            modifier = Modifier.fillMaxWidth(),
-                            color = statusColor
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = if (isRecording) "🎤 Listening..." else "⚡ Executing Actions...",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = statusColor,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-            }
-
-            // Control buttons
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Start Recording Button
-                FilledTonalButton(
-                    onClick = onStart,
-                    modifier = Modifier.weight(1f),
-                    enabled = !isRecording && !isExecutingActions,
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    )
-                ) {
-                    Icon(Icons.Default.Mic, contentDescription = "Start")
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Listen")
-                }
-
-                // Stop Recording Button
-                FilledTonalButton(
-                    onClick = onStop,
-                    modifier = Modifier.weight(1f),
-                    enabled = isRecording,
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.error
-                    )
-                ) {
-                    Icon(Icons.Default.Stop, contentDescription = "Stop")
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Stop")
-                }
-            }
-
-            // Secondary controls
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Screenshot Button
-                OutlinedCard(
-                    onClick = onScreenshot,
-                    modifier = Modifier.weight(1f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+    /**
+     * Stop Enhanced Voice Service
+     */
+    private fun stopEnhancedVoiceService() {
+        val serviceIntent = Intent(this, EnhancedVoiceService::class.java)
+        stopService(serviceIntent)
+        isVoiceServiceRunning = false
+        statusMessage = "Voice service stopped"
+    }
                 ) {
                     Column(
                         modifier = Modifier.padding(12.dp),
