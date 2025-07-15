@@ -30,6 +30,7 @@ import android.speech.tts.TextToSpeech
 import java.util.*
 import android.os.Handler
 import android.os.Looper
+import com.aura.aura_mark3.utils.AudioFileUtils
 
 class AudioRecorderService : Service() {
 
@@ -468,6 +469,9 @@ class AudioRecorderService : Service() {
     private fun transcribeAudioFile(file: File) {
         val wavFile = File(cacheDir, "recording.wav")
         convertPcmToWav(file, wavFile)
+        
+        // Save the audio file for backend processing
+        saveAudioFileForBackend(wavFile)
 
         val apiKey = loadApiKey()
         val groqApi: GroqSttApi = provideGroqSttApi()
@@ -512,6 +516,20 @@ class AudioRecorderService : Service() {
                 sendBroadcast(intent)
             }
         })
+    }
+    
+    /**
+     * Save audio file for backend processing
+     */
+    private fun saveAudioFileForBackend(wavFile: File) {
+        try {
+            // Copy to the AudioFileUtils managed directory
+            val audioData = wavFile.readBytes()
+            AudioFileUtils.saveAudioToFile(this, audioData, "last_recording.wav")
+            Log.i("AURA_AUDIO", "Saved audio file for backend processing: ${audioData.size} bytes")
+        } catch (e: Exception) {
+            Log.e("AURA_AUDIO", "Failed to save audio file for backend", e)
+        }
     }
 
     // Remove speak() and speakInternal()
