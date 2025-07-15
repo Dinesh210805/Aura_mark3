@@ -94,6 +94,7 @@ class AudioRecorderService : Service() {
     private fun broadcastError(message: String) {
         val intent = Intent(ACTION_TRANSCRIPTION).apply {
             putExtra(EXTRA_TRANSCRIPTION, "")
+            setPackage(packageName)
         }
         sendBroadcast(intent)
     }
@@ -114,15 +115,13 @@ class AudioRecorderService : Service() {
 
     @SuppressLint("ObsoleteSdkInt")
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "AURA Audio Recording",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannel(channel)
-        }
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "AURA Audio Recording",
+            NotificationManager.IMPORTANCE_LOW
+        )
+        val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        manager.createNotificationChannel(channel)
     }
 
     private fun buildNotification(): Notification {
@@ -379,12 +378,14 @@ class AudioRecorderService : Service() {
                     // Only broadcast, do not speak
                     val intent = Intent(ACTION_TRANSCRIPTION).apply {
                         putExtra(EXTRA_TRANSCRIPTION, transcription)
+                        setPackage(packageName)
                     }
                     sendBroadcast(intent)
                 } else {
                     Log.e("AURA_STT", "Transcription failed: ${response.code()} ${response.message()}")
                     val intent = Intent(ACTION_TRANSCRIPTION).apply {
                         putExtra(EXTRA_TRANSCRIPTION, "Sorry, speech recognition failed with code ${response.code()}.")
+                        setPackage(packageName)
                     }
                     sendBroadcast(intent)
                 }
@@ -394,6 +395,7 @@ class AudioRecorderService : Service() {
                 Log.e("AURA_STT", "Transcription error", t)
                 val intent = Intent(ACTION_TRANSCRIPTION).apply {
                     putExtra(EXTRA_TRANSCRIPTION, "Failed to connect to server. Please try again.")
+                    setPackage(packageName)
                 }
                 sendBroadcast(intent)
             }

@@ -54,6 +54,16 @@ class ScreenshotHelper(private val activity: Activity) {
         }
     }
 
+    fun handleScreenshotResult(result: androidx.activity.result.ActivityResult, onScreenshotReady: (Bitmap?) -> Unit) {
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            val projectionManager = activity.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            mediaProjection = projectionManager.getMediaProjection(result.resultCode, result.data!!)
+            captureScreenshot(onScreenshotReady)
+        } else {
+            onScreenshotReady(null)
+        }
+    }
+
     @SuppressLint("ObsoleteSdkInt")
     private fun captureScreenshot(onScreenshotReady: (Bitmap?) -> Unit) {
         val windowManager = activity.getSystemService(Context.WINDOW_SERVICE) as WindowManager

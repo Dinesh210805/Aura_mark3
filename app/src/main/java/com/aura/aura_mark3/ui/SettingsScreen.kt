@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -261,7 +262,7 @@ private fun TTSSection(
                     )
 
                     Text(
-                        "${String.format("%.1f", ttsSpeed)}x",
+                        "${String.format(Locale.US, "%.1f", ttsSpeed)}x",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary
                     )

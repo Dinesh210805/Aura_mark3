@@ -112,20 +112,18 @@ class EnhancedVoiceService : Service() {
 
     @SuppressLint("ObsoleteSdkInt")
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "AURA Voice Assistant",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Continuous voice monitoring for Hey Aura wake word"
-                setSound(null, null)
-                enableVibration(false)
-            }
-            
-            val notificationManager = getSystemService(NotificationManager::class.java)
-            notificationManager?.createNotificationChannel(channel)
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "AURA Voice Assistant",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Continuous voice monitoring for Hey Aura wake word"
+            setSound(null, null)
+            enableVibration(false)
         }
+        
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager?.createNotificationChannel(channel)
     }
 
     private fun buildNotification(isListening: Boolean, listeningType: String): Notification {
@@ -407,7 +405,9 @@ class EnhancedVoiceService : Service() {
             broadcastListeningState(true, "command")
             
             // Broadcast wake word detection
-            val intent = Intent(ACTION_WAKE_WORD_DETECTED)
+            val intent = Intent(ACTION_WAKE_WORD_DETECTED).apply {
+                setPackage(packageName)
+            }
             sendBroadcast(intent)
         }
     }
@@ -462,6 +462,7 @@ class EnhancedVoiceService : Service() {
                                 // Broadcast transcription
                                 val intent = Intent(ACTION_VOICE_TRANSCRIPTION).apply {
                                     putExtra(EXTRA_TRANSCRIPTION, transcription)
+                                    setPackage(packageName)
                                 }
                                 sendBroadcast(intent)
                             }
@@ -483,10 +484,48 @@ class EnhancedVoiceService : Service() {
         }
     }
 
+    private fun broadcastAudioLevel(audioLevel: Int) {
+        val intent = Intent(ACTION_AUDIO_LEVEL).apply {
+            putExtra(EXTRA_AUDIO_LEVEL, audioLevel)
+            setPackage(packageName)
+        }
+        sendBroadcast(intent)
+    }
+
+    private fun broadcastListeningState(isListening: Boolean, listeningType: String) {
+        val intent = Intent(ACTION_LISTENING_STATE).apply {
+            putExtra(EXTRA_IS_LISTENING, isListening)
+            putExtra(EXTRA_LISTENING_TYPE, listeningType)
+            setPackage(packageName)
+        }
+        sendBroadcast(intent)
+    }
+
+    // Fix the createTempAudioFile method
     private fun createTempAudioFile(audioData: ShortArray): File? {
         return try {
             val tempFile = File.createTempFile("aura_voice", ".wav", cacheDir)
-            convertPcmToWav(audioData, tempFile)
+            
+            // Convert short array to WAV format
+            val byteData = mutableListOf<Byte>()
+            for (sample in audioData) {
+                val bytes = shortToByteArray(sample)
+                byteData.addAll(bytes.toList())
+            }
+            
+            val totalAudioLen = byteData.size.toLong()
+            val totalDataLen = totalAudioLen + 36
+            val sampleRate = SAMPLE_RATE
+            val channels = 1
+            val byteRate = 16 * sampleRate * channels / 8
+            
+            FileOutputStream(tempFile).use { fos ->
+                // Write WAV header
+                fos.write(createWavHeader(totalAudioLen, totalDataLen, sampleRate, channels, byteRate))
+                // Write audio data
+                fos.write(byteData.toByteArray())
+            }
+            
             tempFile
         } catch (e: Exception) {
             Log.e("EnhancedVoiceService", "Error creating temp audio file", e)
@@ -494,51 +533,65 @@ class EnhancedVoiceService : Service() {
         }
     }
 
-    private fun convertPcmToWav(pcmData: ShortArray, outputFile: File) {
-        try {
-            val totalAudioLen = pcmData.size * 2 // 16-bit = 2 bytes per sample
-            val totalDataLen = totalAudioLen + 36
-            val byteRate = SAMPLE_RATE * 2 // 16-bit mono
-            
-            FileOutputStream(outputFile).use { out ->
-                // WAV header
-                out.write("RIFF".toByteArray())
-                out.write(intToByteArray(totalDataLen))
-                out.write("WAVE".toByteArray())
-                out.write("fmt ".toByteArray())
-                out.write(intToByteArray(16)) // PCM format
-                out.write(shortToByteArray(1)) // Audio format (PCM)
-                out.write(shortToByteArray(1)) // Number of channels (mono)
-                out.write(intToByteArray(SAMPLE_RATE))
-                out.write(intToByteArray(byteRate))
-                out.write(shortToByteArray(2)) // Block align
-                out.write(shortToByteArray(16)) // Bits per sample
-                out.write("data".toByteArray())
-                out.write(intToByteArray(totalAudioLen))
-                
-                // Audio data
-                for (sample in pcmData) {
-                    out.write(shortToByteArray(sample.toShort()))
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("EnhancedVoiceService", "Error converting PCM to WAV", e)
-        }
-    }
-
-    private fun intToByteArray(value: Int): ByteArray {
-        return byteArrayOf(
-            (value and 0xff).toByte(),
-            ((value shr 8) and 0xff).toByte(),
-            ((value shr 16) and 0xff).toByte(),
-            ((value shr 24) and 0xff).toByte()
-        )
+    private fun createWavHeader(
+        totalAudioLen: Long,
+        totalDataLen: Long,
+        sampleRate: Int,
+        channels: Int,
+        byteRate: Int
+    ): ByteArray {
+        val header = ByteArray(44)
+        header[0] = 'R'.code.toByte()
+        header[1] = 'I'.code.toByte()
+        header[2] = 'F'.code.toByte()
+        header[3] = 'F'.code.toByte()
+        header[4] = (totalDataLen and 0xff).toByte()
+        header[5] = ((totalDataLen shr 8) and 0xff).toByte()
+        header[6] = ((totalDataLen shr 16) and 0xff).toByte()
+        header[7] = ((totalDataLen shr 24) and 0xff).toByte()
+        header[8] = 'W'.code.toByte()
+        header[9] = 'A'.code.toByte()
+        header[10] = 'V'.code.toByte()
+        header[11] = 'E'.code.toByte()
+        header[12] = 'f'.code.toByte()
+        header[13] = 'm'.code.toByte()
+        header[14] = 't'.code.toByte()
+        header[15] = ' '.code.toByte()
+        header[16] = 16
+        header[17] = 0
+        header[18] = 0
+        header[19] = 0
+        header[20] = 1
+        header[21] = 0
+        header[22] = channels.toByte()
+        header[23] = 0
+        header[24] = (sampleRate and 0xff).toByte()
+        header[25] = ((sampleRate shr 8) and 0xff).toByte()
+        header[26] = ((sampleRate shr 16) and 0xff).toByte()
+        header[27] = ((sampleRate shr 24) and 0xff).toByte()
+        header[28] = (byteRate and 0xff).toByte()
+        header[29] = ((byteRate shr 8) and 0xff).toByte()
+        header[30] = ((byteRate shr 16) and 0xff).toByte()
+        header[31] = ((byteRate shr 24) and 0xff).toByte()
+        header[32] = (channels * 16 / 8).toByte()
+        header[33] = 0
+        header[34] = 16
+        header[35] = 0
+        header[36] = 'd'.code.toByte()
+        header[37] = 'a'.code.toByte()
+        header[38] = 't'.code.toByte()
+        header[39] = 'a'.code.toByte()
+        header[40] = (totalAudioLen and 0xff).toByte()
+        header[41] = ((totalAudioLen shr 8) and 0xff).toByte()
+        header[42] = ((totalAudioLen shr 16) and 0xff).toByte()
+        header[43] = ((totalAudioLen shr 24) and 0xff).toByte()
+        return header
     }
 
     private fun shortToByteArray(value: Short): ByteArray {
         return byteArrayOf(
-            (value.toInt() and 0xff).toByte(),
-            ((value.toInt() shr 8) and 0xff).toByte()
+            (value.toInt() and 0x00FF).toByte(),
+            ((value.toInt() and 0xFF00) shr 8).toByte()
         )
     }
 
@@ -559,20 +612,5 @@ class EnhancedVoiceService : Service() {
             Log.e("EnhancedVoiceService", "Failed to load API key", e)
             ""
         }
-    }
-
-    private fun broadcastListeningState(isListening: Boolean, listeningType: String) {
-        val intent = Intent(ACTION_LISTENING_STATE).apply {
-            putExtra(EXTRA_IS_LISTENING, isListening)
-            putExtra(EXTRA_LISTENING_TYPE, listeningType)
-        }
-        sendBroadcast(intent)
-    }
-
-    private fun broadcastAudioLevel(level: Int) {
-        val intent = Intent(ACTION_AUDIO_LEVEL).apply {
-            putExtra(EXTRA_AUDIO_LEVEL, level)
-        }
-        sendBroadcast(intent)
     }
 }

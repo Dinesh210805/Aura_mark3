@@ -43,6 +43,7 @@ class AuraAccessibilityService : AccessibilityService() {
         val intent = Intent(ACTION_ACTION_RESULT).apply {
             putExtra(EXTRA_ACTION_RESULT_SUCCESS, success)
             putExtra(EXTRA_ACTION_RESULT_MESSAGE, message)
+            setPackage(packageName)
         }
         sendBroadcast(intent)
     }
@@ -166,6 +167,7 @@ class AuraAccessibilityService : AccessibilityService() {
                 lastForegroundPackage = pkg
                 val intent = Intent(ACTION_FOREGROUND_PACKAGE).apply {
                     putExtra(EXTRA_FOREGROUND_PACKAGE, pkg)
+                    setPackage(packageName)
                 }
                 sendBroadcast(intent)
             }
