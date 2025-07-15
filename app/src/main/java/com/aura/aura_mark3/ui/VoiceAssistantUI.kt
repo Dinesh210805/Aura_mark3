@@ -102,7 +102,17 @@ fun VoiceAssistantUI(
             isTablet = isTablet
         )
 
-        Spacer(modifier = Modifier.height(32.dp))
+        // Status bar moved to top for better visibility
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        StatusBar(
+            statusMessage = statusMessage,
+            isListening = isListening,
+            listeningType = listeningType,
+            isTablet = isTablet
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
 
         // Main voice visualization area
         Box(
@@ -125,32 +135,24 @@ fun VoiceAssistantUI(
                     isTablet = isTablet
                 )
 
-                Spacer(modifier = Modifier.height(24.dp))
-
-                // Status text
-                StatusDisplay(
-                    isListening = isListening,
-                    listeningType = listeningType,
-                    isTablet = isTablet
-                )
-
                 Spacer(modifier = Modifier.height(32.dp))
 
                 // Conversation display
                 ConversationDisplay(
                     userTranscription = userTranscription,
                     assistantSpeech = assistantSpeech,
-                    statusMessage = statusMessage,
                     isTablet = isTablet
                 )
             }
         }
 
-        // Bottom controls
+        // Bottom controls with clear button state
         BottomControls(
             buttonText = buttonText,
             canRecord = canRecord,
             onManualRecord = onManualRecord,
+            isListening = isListening,
+            listeningType = listeningType,
             isTablet = isTablet
         )
     }
@@ -317,45 +319,159 @@ private fun DrawScope.drawAudioWaves(
 }
 
 @Composable
-private fun StatusDisplay(
+private fun StatusBar(
+    statusMessage: String,
     isListening: Boolean,
     listeningType: String,
     isTablet: Boolean
 ) {
-    val statusText = when {
-        !isListening -> "Voice assistant ready"
-        listeningType == "wake_word" -> "Say \"Hey Aura\" to start"
-        listeningType == "command" -> "Listening... speak your command"
-        listeningType == "manual" -> "Recording... speak now"
-        else -> "Processing..."
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = if (isTablet) 32.dp else 8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = when {
+                isListening && listeningType == "manual" -> Color(0xFF2E7D32).copy(alpha = 0.3f)
+                isListening -> Color(0xFF1976D2).copy(alpha = 0.3f)
+                else -> Color(0xFF424242).copy(alpha = 0.3f)
+            }
+        ),
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Status indicator
+            Box(
+                modifier = Modifier
+                    .size(12.dp)
+                    .background(
+                        color = when {
+                            isListening && listeningType == "manual" -> Color(0xFF4CAF50)
+                            isListening -> Color(0xFF2196F3)
+                            else -> Color(0xFF757575)
+                        },
+                        shape = CircleShape
+                    )
+            )
+            
+            // Status text
+            Text(
+                text = statusMessage,
+                fontSize = if (isTablet) 16.sp else 14.sp,
+                color = Color.White,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f)
+            )
+            
+            // Activity indicator
+            if (isListening) {
+                Icon(
+                    imageVector = Icons.Default.Mic,
+                    contentDescription = "Recording",
+                    tint = Color(0xFF4CAF50),
+                    modifier = Modifier.size(if (isTablet) 20.dp else 16.dp)
+                )
+            }
+        }
     }
+}
 
-    val statusColor = when (listeningType) {
-        "wake_word" -> Color(0xFF64FFDA)
-        "command" -> Color(0xFF4CAF50)
-        "manual" -> Color(0xFFFF9800)
-        else -> Color(0xFFBDBDBD)
+@Composable
+private fun BottomControls(
+    buttonText: String,
+    canRecord: Boolean,
+    onManualRecord: () -> Unit,
+    isListening: Boolean,
+    listeningType: String,
+    isTablet: Boolean
+) {
+    var isPressed by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Button state hint
+        Text(
+            text = when {
+                isListening && listeningType == "manual" -> "Tap to stop recording"
+                isListening -> "Tap to interrupt or wait for silence"
+                else -> "Tap to start voice command"
+            },
+            fontSize = if (isTablet) 14.sp else 12.sp,
+            color = Color.White.copy(alpha = 0.7f),
+            textAlign = TextAlign.Center
+        )
+        
+        // Main voice button
+        FilledTonalButton(
+            onClick = { 
+                isPressed = true
+                onManualRecord()
+                coroutineScope.launch {
+                    delay(200)
+                    isPressed = false
+                }
+            },
+            enabled = canRecord,
+            modifier = Modifier
+                .height(if (isTablet) 64.dp else 56.dp)
+                .widthIn(min = if (isTablet) 240.dp else 200.dp)
+                .scale(if (isPressed) 0.95f else 1f),
+            colors = ButtonDefaults.filledTonalButtonColors(
+                containerColor = when {
+                    !canRecord -> Color(0xFF424242).copy(alpha = 0.3f)
+                    isPressed -> Color(0xFF00BCD4).copy(alpha = 0.7f)
+                    buttonText.contains("Stop") || buttonText.contains("Interrupt") -> Color(0xFFFF5722).copy(alpha = 0.4f)
+                    else -> Color(0xFF4CAF50).copy(alpha = 0.4f)
+                },
+                contentColor = when {
+                    !canRecord -> Color(0xFF757575)
+                    isPressed -> Color(0xFF00BCD4)
+                    buttonText.contains("Stop") || buttonText.contains("Interrupt") -> Color(0xFFFF5722)
+                    else -> Color(0xFF4CAF50)
+                },
+                disabledContainerColor = Color(0xFF424242).copy(alpha = 0.2f),
+                disabledContentColor = Color(0xFF757575)
+            ),
+            shape = RoundedCornerShape(28.dp)
+        ) {
+            Icon(
+                imageVector = when {
+                    buttonText.contains("Stop") -> Icons.Default.Stop
+                    buttonText.contains("Interrupt") -> Icons.Default.VolumeOff
+                    else -> Icons.Default.Mic
+                },
+                contentDescription = buttonText,
+                modifier = Modifier.size(if (isTablet) 28.dp else 24.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = buttonText,
+                fontSize = if (isTablet) 18.sp else 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
     }
-
-    Text(
-        text = statusText,
-        fontSize = if (isTablet) 20.sp else 16.sp,
-        color = statusColor,
-        textAlign = TextAlign.Center,
-        fontWeight = if (isListening) FontWeight.SemiBold else FontWeight.Normal
-    )
 }
 
 @Composable
 private fun ConversationDisplay(
     userTranscription: String,
     assistantSpeech: String,
-    statusMessage: String,
     isTablet: Boolean
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // User message
         AnimatedVisibility(
@@ -364,16 +480,13 @@ private fun ConversationDisplay(
             exit = slideOutVertically() + fadeOut()
         ) {
             ConversationCard(
-                title = "You said:",
+                title = "You:",
                 content = userTranscription,
                 backgroundColor = Color(0xFF1E3A8A),
                 textColor = Color(0xFF93C5FD),
+                icon = Icons.Default.Person,
                 isTablet = isTablet
             )
-        }
-
-        if (userTranscription.isNotBlank()) {
-            Spacer(modifier = Modifier.height(12.dp))
         }
 
         // Assistant response
@@ -387,25 +500,7 @@ private fun ConversationDisplay(
                 content = assistantSpeech,
                 backgroundColor = Color(0xFF064E3B),
                 textColor = Color(0xFF6EE7B7),
-                isTablet = isTablet
-            )
-        }
-
-        if (assistantSpeech.isNotBlank()) {
-            Spacer(modifier = Modifier.height(12.dp))
-        }
-
-        // Status message
-        AnimatedVisibility(
-            visible = statusMessage.isNotBlank(),
-            enter = slideInVertically() + fadeIn(),
-            exit = slideOutVertically() + fadeOut()
-        ) {
-            ConversationCard(
-                title = "Status:",
-                content = statusMessage,
-                backgroundColor = Color(0xFF7C2D12),
-                textColor = Color(0xFFFBBF24),
+                icon = Icons.Default.Psychology,
                 isTablet = isTablet
             )
         }
@@ -418,6 +513,7 @@ private fun ConversationCard(
     content: String,
     backgroundColor: Color,
     textColor: Color,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     isTablet: Boolean
 ) {
     Card(
@@ -428,80 +524,33 @@ private fun ConversationCard(
         shape = RoundedCornerShape(16.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text(
-                text = title,
-                fontSize = if (isTablet) 16.sp else 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = textColor.copy(alpha = 0.8f)
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = content,
-                fontSize = if (isTablet) 18.sp else 16.sp,
-                color = textColor,
-                lineHeight = if (isTablet) 24.sp else 22.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun BottomControls(
-    buttonText: String,
-    canRecord: Boolean,
-    onManualRecord: () -> Unit,
-    isTablet: Boolean
-) {
-    var isPressed by remember { mutableStateOf(false) }
-    val coroutineScope = rememberCoroutineScope()
-    
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
-    ) {
-        // Main voice button
-        FilledTonalButton(
-            onClick = { 
-                isPressed = true
-                onManualRecord()
-                coroutineScope.launch {
-                    delay(200)
-                    isPressed = false
-                }
-            },
-            enabled = canRecord,
-            modifier = Modifier
-                .height(if (isTablet) 56.dp else 48.dp)
-                .widthIn(min = if (isTablet) 200.dp else 160.dp)
-                .scale(if (isPressed) 0.95f else 1f),
-            colors = ButtonDefaults.filledTonalButtonColors(
-                containerColor = when {
-                    isPressed -> Color(0xFF00BCD4).copy(alpha = 0.5f)
-                    buttonText.contains("Stop") -> Color(0xFFFF5722).copy(alpha = 0.3f) 
-                    else -> Color(0xFF64FFDA).copy(alpha = 0.2f)
-                },
-                contentColor = when {
-                    isPressed -> Color(0xFF00BCD4)
-                    buttonText.contains("Stop") -> Color(0xFFFF5722) 
-                    else -> Color(0xFF64FFDA)
-                }
-            ),
-            shape = RoundedCornerShape(24.dp)
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Icon(
-                imageVector = if (buttonText.contains("Stop")) Icons.Default.Stop else Icons.Default.Mic,
-                contentDescription = buttonText,
+                imageVector = icon,
+                contentDescription = title,
+                tint = textColor.copy(alpha = 0.8f),
                 modifier = Modifier.size(if (isTablet) 24.dp else 20.dp)
             )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = buttonText,
-                fontSize = if (isTablet) 16.sp else 14.sp,
-                fontWeight = FontWeight.SemiBold
-            )
+            
+            Column {
+                Text(
+                    text = title,
+                    fontSize = if (isTablet) 16.sp else 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = textColor.copy(alpha = 0.8f)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = content,
+                    fontSize = if (isTablet) 18.sp else 16.sp,
+                    color = textColor,
+                    lineHeight = if (isTablet) 24.sp else 22.sp
+                )
+            }
         }
     }
 }

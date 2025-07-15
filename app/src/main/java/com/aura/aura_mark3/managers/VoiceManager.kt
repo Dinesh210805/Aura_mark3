@@ -2,7 +2,6 @@ package com.aura.aura_mark3.managers
 
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
@@ -35,10 +34,11 @@ class VoiceManager(
         private set
     var isRecording by mutableStateOf(false)
         private set
+    var isProcessing by mutableStateOf(false)
     var isVoiceServiceRunning by mutableStateOf(false)
         private set
     var assistantSpeech by mutableStateOf("")
-    var statusMessage by mutableStateOf("")
+    var statusMessage by mutableStateOf("🎤 Ready - Tap to Talk")
     
     // Current voice state for proper UI control
     var currentVoiceState by mutableStateOf(VoiceState.IDLE)
@@ -50,6 +50,9 @@ class VoiceManager(
     
     // Conversation mode for continuous listening
     var conversationMode by mutableStateOf(false)
+    
+    // Flag to start listening after speech completion
+    var shouldStartListeningAfterSpeech by mutableStateOf(false)
     
     // TTS Settings
     var ttsFeedbackEnabled by mutableStateOf(true)
@@ -71,6 +74,9 @@ class VoiceManager(
     private var speakingTimeoutHandler: Handler? = null
     private val SPEAKING_TIMEOUT = 30000L // 30 seconds max speaking time
     
+    // Callback for when transcription is received
+    var onTranscriptionReceived: ((String) -> Unit)? = null
+    
     /**
      * Initialize TTS with callback for when ready
      */
@@ -84,7 +90,7 @@ class VoiceManager(
                 onInitialized()
             } else {
                 Log.e("AURA_TTS", "TTS initialization failed")
-                statusMessage = "TTS initialization failed"
+                statusMessage = "❌ TTS initialization failed"
             }
         }
     }
@@ -103,6 +109,7 @@ class VoiceManager(
     private fun updateVoiceState() {
         val newState = when {
             isSpeaking -> VoiceState.SPEAKING
+            isProcessing -> VoiceState.PROCESSING
             isRecording && isManualRecording -> VoiceState.RECORDING_MANUAL
             isRecording -> VoiceState.RECORDING_COMMAND
             isVoiceServiceRunning -> VoiceState.LISTENING_WAKE_WORD
@@ -112,7 +119,40 @@ class VoiceManager(
         if (currentVoiceState != newState) {
             Log.d("AURA_STATE", "Voice state changed: ${currentVoiceState} -> $newState")
             currentVoiceState = newState
+            updateStatusMessage()
         }
+    }
+    
+    /**
+     * Update status message based on current state
+     */
+    private fun updateStatusMessage() {
+        statusMessage = when (currentVoiceState) {
+            VoiceState.IDLE -> "🎤 Ready - Tap to Talk"
+            VoiceState.LISTENING_WAKE_WORD -> "👂 Listening for 'Hey Aura'"
+            VoiceState.RECORDING_MANUAL -> "🔴 Recording - Speak now!"
+            VoiceState.RECORDING_COMMAND -> "🔴 Recording command..."
+            VoiceState.PROCESSING -> "🤔 Processing your request..."
+            VoiceState.SPEAKING -> "🗣️ AURA is speaking..."
+        }
+    }
+    
+    /**
+     * Handle transcription received from recording service
+     */
+    fun handleTranscriptionReceived(transcription: String) {
+        Log.i("AURA_VOICE", "Transcription received: $transcription")
+        
+        // Stop recording state
+        isRecording = false
+        isManualRecording = false
+        
+        // Set processing state
+        isProcessing = true
+        updateVoiceState()
+        
+        // Invoke callback
+        onTranscriptionReceived?.invoke(transcription)
     }
     
     /**
@@ -138,8 +178,14 @@ class VoiceManager(
             return
         }
         
+        // Stop processing, start speaking - IMPORTANT: Stop all recording to prevent feedback
+        isProcessing = false
         isSpeaking = true
         assistantSpeech = text
+        
+        // Stop any ongoing recording to prevent feedback loop
+        stopAllRecording()
+        
         updateVoiceState()
         
         // Start speaking timeout
@@ -197,6 +243,10 @@ class VoiceManager(
         
         isSpeaking = true
         assistantSpeech = text
+        
+        // Stop any ongoing recording to prevent feedback loop
+        stopAllRecording()
+        
         updateVoiceState()
         
         try {
@@ -227,11 +277,17 @@ class VoiceManager(
             updateVoiceState()
             speakingTimeoutHandler?.removeCallbacksAndMessages(null)
             
-            if (conversationMode && !isRecording) {
-                statusMessage = "Ready to listen"
-                startManualRecordingForConversation()
-            } else {
-                statusMessage = "Ready for commands"
+            // Resume listening after a delay to ensure TTS audio has fully stopped
+            mainHandler.postDelayed({
+                resumeListening()
+            }, 1000L)
+            
+            // Check if we should automatically start listening after speech
+            if (shouldStartListeningAfterSpeech && conversationMode && !isRecording) {
+                shouldStartListeningAfterSpeech = false
+                startConversationRecording()
+            } else if (conversationMode && !isRecording) {
+                startConversationRecording()
             }
             
             onComplete?.invoke()
@@ -239,17 +295,21 @@ class VoiceManager(
     }
     
     /**
-     * Start speaking timeout to prevent stuck states
+     * Start recording for conversation mode after AURA finishes speaking
      */
-    private fun startSpeakingTimeout() {
-        speakingTimeoutHandler?.removeCallbacksAndMessages(null)
-        speakingTimeoutHandler = Handler(Looper.getMainLooper())
-        speakingTimeoutHandler?.postDelayed({
-            if (isSpeaking) {
-                Log.w("AURA_VOICE", "Speaking timeout reached, force resetting state")
-                resetSpeakingState()
+    private fun startConversationRecording() {
+        if (!conversationMode || isRecording || isSpeaking || isProcessing) {
+            return
+        }
+        
+        Log.d("AURA_VOICE", "Starting conversation recording")
+        
+        // Wait a moment before starting recording to avoid capturing the end of TTS
+        mainHandler.postDelayed({
+            if (!isRecording && !isSpeaking && !isProcessing && conversationMode) {
+                startManualRecording()
             }
-        }, SPEAKING_TIMEOUT)
+        }, 500L)
     }
     
     /**
@@ -299,7 +359,13 @@ class VoiceManager(
     fun startManualRecording() {
         if (isSpeaking) {
             Log.w("AURA_VOICE", "Cannot start recording while AURA is speaking")
-            statusMessage = "Please wait for AURA to finish speaking"
+            statusMessage = "⏳ Please wait for AURA to finish speaking"
+            return
+        }
+        
+        if (isProcessing) {
+            Log.w("AURA_VOICE", "Cannot start recording while processing")
+            statusMessage = "⏳ Please wait, I'm thinking..."
             return
         }
         
@@ -309,14 +375,14 @@ class VoiceManager(
         }
         
         if (!micPermissionProvider()) {
-            statusMessage = "Microphone permission required"
+            statusMessage = "❌ Microphone permission required"
             speakWithPlayAITts("Please grant microphone permission to use voice commands.")
             return
         }
         
         // Check API cooldown
         if (!canMakeApiCall()) {
-            statusMessage = "Please wait a moment before recording again"
+            statusMessage = "⏳ Please wait a moment before recording again"
             return
         }
         
@@ -327,7 +393,6 @@ class VoiceManager(
             updateVoiceState()
             
             Log.i("AURA_VOICE", "Starting manual recording")
-            statusMessage = "🎤 Starting recording..."
             
             val recordIntent = Intent(context, AudioRecorderService::class.java)
             recordIntent.putExtra("isManualActivation", true)
@@ -335,14 +400,12 @@ class VoiceManager(
             val componentName = context.startForegroundService(recordIntent)
             Log.i("AURA_VOICE", "AudioRecorderService started: $componentName")
             
-            statusMessage = "🎤 Recording - speak now"
-            
         } catch (e: Exception) {
             Log.e("AURA_VOICE", "Failed to start manual recording", e)
             isManualRecording = false
             isRecording = false
             updateVoiceState()
-            statusMessage = "Failed to start recording"
+            statusMessage = "❌ Failed to start recording"
         }
     }
     
@@ -358,27 +421,29 @@ class VoiceManager(
             isManualRecording = false
             conversationMode = false
             updateVoiceState()
-            statusMessage = "Recording stopped"
             Log.i("AURA_VOICE", "Manual recording stopped successfully")
         } catch (e: Exception) {
             Log.e("AURA_VOICE", "Error stopping manual recording", e)
             isRecording = false
             isManualRecording = false
             updateVoiceState()
-            statusMessage = "Recording stopped"
         }
     }
     
     /**
-     * Start recording for conversation mode after AURA finishes speaking
+     * Handle transcription received from AudioRecorderService
+     * This method should be called by the AudioRecorderService when transcription is complete
      */
-    private fun startManualRecordingForConversation() {
-        if (!conversationMode || isRecording || isSpeaking) {
-            return
-        }
+    fun onRecordingComplete(transcription: String) {
+        Log.i("AURA_VOICE", "Recording completed with transcription: '$transcription'")
         
-        Log.d("AURA_VOICE", "Starting conversation recording")
-        startManualRecording()
+        // Stop recording state
+        isRecording = false
+        isManualRecording = false
+        updateVoiceState()
+        
+        // Process the transcription
+        handleTranscriptionReceived(transcription)
     }
     
     /**
@@ -435,38 +500,46 @@ class VoiceManager(
         return when (currentVoiceState) {
             VoiceState.IDLE -> RecordingStatus(
                 state = currentVoiceState,
-                buttonText = "Tap to Talk",
-                canStartRecording = !isSpeaking,
+                buttonText = "🎤 Tap to Talk",
+                canStartRecording = true,
                 canStopRecording = false,
-                statusMessage = "Ready to listen"
+                statusMessage = statusMessage
             )
             VoiceState.LISTENING_WAKE_WORD -> RecordingStatus(
                 state = currentVoiceState,
-                buttonText = "Tap to Talk",
-                canStartRecording = !isSpeaking,
+                buttonText = "🎤 Tap to Talk",
+                canStartRecording = true,
                 canStopRecording = false,
-                statusMessage = "Listening for wake word"
+                statusMessage = statusMessage
             )
             VoiceState.RECORDING_MANUAL -> RecordingStatus(
                 state = currentVoiceState,
-                buttonText = "Stop Recording",
+                buttonText = "🛑 Stop Recording",
                 canStartRecording = false,
                 canStopRecording = true,
-                statusMessage = "Recording your command"
+                statusMessage = statusMessage
             )
             VoiceState.RECORDING_COMMAND -> RecordingStatus(
                 state = currentVoiceState,
-                buttonText = "Stop Recording",
+                buttonText = "🛑 Stop Recording",
                 canStartRecording = false,
                 canStopRecording = true,
-                statusMessage = "Recording command"
+                statusMessage = statusMessage
+            )
+            VoiceState.PROCESSING -> RecordingStatus(
+                state = currentVoiceState,
+                buttonText = "🤔 Processing...",
+                canStartRecording = false,
+                canStopRecording = false,
+                statusMessage = statusMessage,
+                isProcessing = true
             )
             VoiceState.SPEAKING -> RecordingStatus(
                 state = currentVoiceState,
-                buttonText = "Interrupt",
+                buttonText = "🔇 Interrupt",
                 canStartRecording = false,
                 canStopRecording = false,
-                statusMessage = "AURA is speaking"
+                statusMessage = statusMessage
             )
         }
     }
@@ -474,6 +547,21 @@ class VoiceManager(
     /**
      * Cleanup resources
      */
+    /**
+     * Start speaking timeout to prevent indefinite speaking state
+     */
+    private fun startSpeakingTimeout() {
+        speakingTimeoutHandler?.removeCallbacksAndMessages(null)
+        speakingTimeoutHandler = Handler(Looper.getMainLooper())
+        speakingTimeoutHandler?.postDelayed({
+            Log.w("AURA_TTS", "Speaking timeout reached, forcing stop")
+            audioPlayer.stop()
+            isSpeaking = false
+            isProcessing = false
+            updateVoiceState()
+        }, SPEAKING_TIMEOUT)
+    }
+    
     fun cleanup() {
         Log.i("AURA_VOICE", "Cleaning up VoiceManager")
         
@@ -499,10 +587,69 @@ class VoiceManager(
             isVoiceServiceRunning = false
             isManualRecording = false
             conversationMode = false
+            shouldStartListeningAfterSpeech = false
             currentVoiceState = VoiceState.IDLE
             
         } catch (e: Exception) {
             Log.e("AURA_VOICE", "Error during cleanup", e)
         }
+    }
+    
+    /**
+     * Stop all recording services to prevent feedback during TTS
+     */
+    private fun stopAllRecording() {
+        try {
+            // Stop manual recording service
+            val stopIntent = Intent(context, AudioRecorderService::class.java)
+            context.stopService(stopIntent)
+            
+            // Pause enhanced voice service
+            val pauseIntent = Intent(context, EnhancedVoiceService::class.java).apply {
+                putExtra("pauseListening", true)
+            }
+            context.startService(pauseIntent)
+            
+            isRecording = false
+            isManualRecording = false
+            
+            Log.i("AURA_TTS", "Stopped all recording services before TTS")
+        } catch (e: Exception) {
+            Log.w("AURA_TTS", "Error stopping recording services", e)
+        }
+    }
+
+    /**
+     * Resume listening after TTS completes
+     */
+    private fun resumeListening() {
+        try {
+            // Resume enhanced voice service if it was running
+            if (isVoiceServiceRunning) {
+                val resumeIntent = Intent(context, EnhancedVoiceService::class.java).apply {
+                    putExtra("resumeListening", true)
+                }
+                context.startService(resumeIntent)
+                Log.i("AURA_TTS", "Resumed enhanced voice service after TTS")
+            }
+        } catch (e: Exception) {
+            Log.w("AURA_TTS", "Error resuming listening", e)
+        }
+    }
+
+    /**
+     * Resume listening after TTS with delay to prevent feedback
+     */
+    private fun resumeListeningAfterTts() {
+        mainHandler.postDelayed({
+            resumeListening()
+        }, 500L) // Small delay to ensure TTS audio is fully stopped
+    }
+
+    /**
+     * Public method to update voice state externally
+     */
+    fun updateVoiceStateExternal() {
+        updateVoiceState()
     }
 }

@@ -77,6 +77,9 @@ class EnhancedVoiceService : Service() {
     private val isListeningForWakeWord = AtomicBoolean(true)
     private val isRecordingCommand = AtomicBoolean(false)
     
+    // Add a flag for pausing/resuming
+    private val isPaused = AtomicBoolean(false)
+    
     private var currentAudioLevel = 0
     private var lastVoiceDetectedTime = 0L
     private var wakeWordDetectedTime = 0L
@@ -105,8 +108,19 @@ class EnhancedVoiceService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (!isRunning.get()) {
-            startContinuousListening()
+        // Handle pause/resume commands to prevent feedback during TTS
+        when {
+            intent?.getBooleanExtra("pauseListening", false) == true -> {
+                Log.i("EnhancedVoiceService", "Pausing listening to prevent TTS feedback")
+                pauseListening()
+            }
+            intent?.getBooleanExtra("resumeListening", false) == true -> {
+                Log.i("EnhancedVoiceService", "Resuming listening after TTS")
+                resumeListening()
+            }
+            !isRunning.get() -> {
+                startContinuousListening()
+            }
         }
         return START_STICKY
     }
@@ -258,6 +272,12 @@ class EnhancedVoiceService : Service() {
                     
                     // Broadcast audio level for UI feedback
                     broadcastAudioLevel(audioLevel)
+                    
+                    // Skip processing if paused (during TTS playback)
+                    if (isPaused.get()) {
+                        Thread.sleep(50) // Sleep longer when paused to save CPU
+                        continue
+                    }
                     
                     // Process based on current state
                     when {
@@ -422,7 +442,9 @@ class EnhancedVoiceService : Service() {
                                 transcription.contains("hey there") ||
                                 transcription.contains("hey") ||
                                 transcription.contains("hello") ||
-                                transcription.length > 10) { // Any substantial speech
+                                transcription.length > 10) // Any substantial speech
+                                
+                            {
                                 
                                 Log.i("EnhancedVoiceService", "Wake word pattern detected: '$transcription'")
                                 onWakeWordDetected()
@@ -564,6 +586,22 @@ class EnhancedVoiceService : Service() {
             setPackage(packageName)
         }
         sendBroadcast(intent)
+    }
+
+    /**
+     * Temporarily pause listening to prevent feedback during TTS
+     */
+    private fun pauseListening() {
+        isPaused.set(true)
+        Log.i("EnhancedVoiceService", "Listening paused to prevent TTS feedback")
+    }
+
+    /**
+     * Resume listening after TTS completion
+     */
+    private fun resumeListening() {
+        isPaused.set(false)
+        Log.i("EnhancedVoiceService", "Listening resumed after TTS")
     }
 
     // Fix the createTempAudioFile method

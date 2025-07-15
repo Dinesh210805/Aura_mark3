@@ -55,6 +55,12 @@ class EventManager(
             val transcription = intent?.getStringExtra(AudioRecorderService.EXTRA_TRANSCRIPTION) ?: ""
             Log.i("AURA_STT", "Received transcription: \"$transcription\"")
             
+            // Don't process transcriptions when AURA is speaking to prevent feedback
+            if (voiceManager.isSpeaking) {
+                Log.i("AURA_STT", "Ignoring transcription while AURA is speaking to prevent feedback")
+                return
+            }
+            
             if (transcription.isNotBlank()) {
                 val filteredTranscription = filterOutAuraVoice(transcription)
                 Log.i("AURA_STT", "Filtered transcription: \"$filteredTranscription\"")
@@ -80,16 +86,34 @@ class EventManager(
             "hello joyboy", "i'm aura", "aura here", "voice assistant",
             "how can i help", "what can i do", "i can help you",
             "absolutely", "right away", "got it", "sure thing",
-            "of course", "certainly", "no problem"
+            "of course", "certainly", "no problem", "i'm ready to help",
+            "amazing voice assistant", "let's make some magic", "thrill",
+            "ready to help you today", "say hey aura", "tap the microphone",
+            "grant microphone permission", "failed to connect to server",
+            "try again", "speech recognition failed", "processing your request",
+            "i'm sorry", "couldn't process", "having trouble"
         )
         
-        val lowerTranscription = transcription.lowercase()
+        val lowerTranscription = transcription.lowercase().trim()
+        
+        // More sophisticated filtering
         val containsAuraIndicator = auraIndicators.any { indicator ->
             lowerTranscription.contains(indicator)
         }
         
-        return if (containsAuraIndicator) {
-            Log.i("AURA_FILTER", "Filtering out potential AURA voice: $transcription")
+        // Filter very short transcriptions that are likely TTS artifacts
+        val tooShort = lowerTranscription.length < 3
+        
+        // Filter if it sounds like computer-generated speech patterns
+        val computerSpeechPatterns = listOf("uh", "um", "er", "ah", "oh")
+        val onlyFillerWords = computerSpeechPatterns.any { pattern ->
+            lowerTranscription == pattern || lowerTranscription.split(" ").all { word ->
+                computerSpeechPatterns.contains(word.trim())
+            }
+        }
+        
+        return if (containsAuraIndicator || tooShort || onlyFillerWords) {
+            Log.i("AURA_FILTER", "Filtering out potential AURA voice/artifact: '$transcription'")
             ""
         } else {
             transcription
@@ -122,6 +146,12 @@ class EventManager(
         override fun onReceive(context: Context?, intent: Intent?) {
             val transcription = intent?.getStringExtra(EnhancedVoiceService.EXTRA_TRANSCRIPTION) ?: ""
             Log.i("AURA_VOICE", "Enhanced Voice Service transcription: \"$transcription\"")
+            
+            // Don't process transcriptions when AURA is speaking to prevent feedback
+            if (voiceManager.isSpeaking) {
+                Log.i("AURA_VOICE", "Ignoring enhanced voice transcription while AURA is speaking")
+                return
+            }
             
             if (transcription.isNotBlank()) {
                 val filteredTranscription = filterOutAuraVoice(transcription)

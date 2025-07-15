@@ -24,16 +24,14 @@ import android.util.Log
 // See Groq API docs for required fields
 // Example: { "model": "playai-tts-1", "input": "Hello world", "voice": "nova" }
 data class PlayAITtsRequest(
-    val model: String = "playai-tts",
-    val input: String,
-    val voice: String = "nova",
-    val response_format: String = "mp3",
-    val speed: Float = 1.2f // Add speed parameter, default 1.2
+    val text: String, // Changed from 'input' to 'text'
+    val voice: String = "Arista-PlayAI",
+    val speed: String = "1.2" // Changed from Float to String
 )
 
 interface PlayAITtsApi {
-    @POST("/openai/v1/audio/speech")
-    fun synthesizeSpeech(
+    @POST("openai/v1/audio/speech") // Removed leading slash
+    fun textToSpeech( // Changed method name to match VoiceManager usage
         @Header("Authorization") authHeader: String,
         @Body request: PlayAITtsRequest
     ): Call<ResponseBody>
@@ -112,4 +110,4 @@ fun playAudioFromResponse(
         Log.e(TAG, "Exception saving or preparing audio file", e)
         onError?.invoke(e)
     }
-} 
+}

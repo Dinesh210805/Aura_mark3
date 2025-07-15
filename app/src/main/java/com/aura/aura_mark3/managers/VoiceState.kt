@@ -8,6 +8,7 @@ enum class VoiceState {
     LISTENING_WAKE_WORD,     // Listening for "Hey Aura"
     RECORDING_MANUAL,        // User pressed button to record
     RECORDING_COMMAND,       // Recording after wake word detected
+    PROCESSING,              // Processing audio/sending to AI
     SPEAKING                 // AURA is currently speaking
 }
 
@@ -19,7 +20,8 @@ data class RecordingStatus(
     val buttonText: String,
     val canStartRecording: Boolean,
     val canStopRecording: Boolean,
-    val statusMessage: String
+    val statusMessage: String,
+    val isProcessing: Boolean = false
 ) {
     companion object {
         fun fromState(
@@ -66,6 +68,14 @@ data class RecordingStatus(
                     canStopRecording = true,
                     buttonText = "Stop Recording",
                     statusMessage = "🗣️ Recording command..."
+                )
+                VoiceState.PROCESSING -> RecordingStatus(
+                    state = actualState,
+                    canStartRecording = false,
+                    canStopRecording = false,
+                    buttonText = "🤔 Processing...",
+                    statusMessage = "🤔 Processing your request...",
+                    isProcessing = true
                 )
                 VoiceState.SPEAKING -> RecordingStatus(
                     state = actualState,

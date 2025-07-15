@@ -43,22 +43,32 @@ class AudioRecorderService : Service() {
 
         const val ACTION_TRANSCRIPTION = "com.aura.aura_mark3.TRANSCRIPTION"
         const val EXTRA_TRANSCRIPTION = "transcription"
+        
+        // New constants for streaming
+        const val CHUNK_DURATION_MS = 2000 // 2 seconds per chunk
+        const val SILENCE_THRESHOLD = 1500 // Audio level below this is considered silence
+        const val SILENCE_DURATION_MS = 1500 // 1.5 seconds of silence to auto-stop
+        const val MIN_RECORDING_DURATION_MS = 1000 // Minimum 1 second recording
     }
 
     private var audioRecord: AudioRecord? = null
     private var recordingThread: Thread? = null
     private var isRecording = AtomicBoolean(false)
     private var outputFile: File? = null
-    private var tts: TextToSpeech? = null
-
-    private var isTtsInitialized = false
-    private val ttsQueue = mutableListOf<String>()
+    
+    // Streaming variables
+    private val audioBuffer = mutableListOf<Short>()
+    private var lastVoiceDetectedTime = 0L
+    private var recordingStartTime = 0L
+    private var currentAudioLevel = 0
+    
+    // Handler for main thread operations
     private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        // Remove TTS initialization
+        Log.i("AURA_AUDIO", "AudioRecorderService created with streaming support")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -155,64 +165,166 @@ class AudioRecorderService : Service() {
         }
 
         try {
-            // Check if AudioRecord can be created before actually creating it
-            val testRecord = AudioRecord(
-                AUDIO_SOURCE, SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT, bufferSize
+            audioRecord = AudioRecord(
+                AUDIO_SOURCE, SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT, bufferSize * 2
             )
             
-            if (testRecord.state != AudioRecord.STATE_INITIALIZED) {
-                Log.e("AURA_AUDIO", "AudioRecord failed to initialize - state: ${testRecord.state}")
-                testRecord.release()
+            if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+                Log.e("AURA_AUDIO", "AudioRecord failed to initialize")
+                audioRecord?.release()
                 broadcastError("Failed to initialize audio recording")
                 stopSelf()
                 return
             }
             
-            // If test succeeded, use it as the actual recorder
-            audioRecord = testRecord
             outputFile = File(cacheDir, "recording_${System.currentTimeMillis()}.pcm")
             
-            Log.i("AURA_AUDIO", "Starting audio recording to ${outputFile?.name}")
+            Log.i("AURA_AUDIO", "Starting streaming audio recording")
             isRecording.set(true)
+            recordingStartTime = System.currentTimeMillis()
+            lastVoiceDetectedTime = recordingStartTime
+            audioBuffer.clear()
+            
             audioRecord?.startRecording()
 
             recordingThread = Thread {
-                val buffer = ByteArray(bufferSize)
-                try {
-                    FileOutputStream(outputFile).use { fos ->
-                        Log.i("AURA_AUDIO", "Recording thread started")
-                        while (isRecording.get()) {
-                            val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
-                            if (read > 0) {
-                                fos.write(buffer, 0, read)
-                            } else if (read < 0) {
-                                Log.w("AURA_AUDIO", "AudioRecord read error: $read")
-                                break
-                            }
-                        }
-                        Log.i("AURA_AUDIO", "Recording thread finished")
-                    }
-                } catch (e: Exception) {
-                    Log.e("AURA_AUDIO", "Error in recording thread", e)
-                    isRecording.set(false)
-                }
+                processStreamingAudio()
             }
-
             recordingThread?.start()
-            Log.i("AURA_AUDIO", "Audio recording started successfully")
+            
+            Log.i("AURA_AUDIO", "Streaming audio recording started successfully")
             
         } catch (e: SecurityException) {
             Log.e("AURA_AUDIO", "Security exception while creating AudioRecord", e)
             broadcastError("Audio permission denied")
             stopSelf()
-        } catch (e: IllegalArgumentException) {
-            Log.e("AURA_AUDIO", "Invalid audio parameters", e)
-            broadcastError("Invalid audio configuration")
-            stopSelf()
         } catch (e: Exception) {
             Log.e("AURA_AUDIO", "Unexpected error starting recording", e)
             broadcastError("Failed to start recording")
             stopSelf()
+        }
+    }
+    
+    private fun processStreamingAudio() {
+        val buffer = ShortArray(1024)
+        val chunkSizeInSamples = SAMPLE_RATE * CHUNK_DURATION_MS / 1000 // 2 seconds worth of samples
+        
+        try {
+            FileOutputStream(outputFile).use { fos ->
+                Log.i("AURA_AUDIO", "Starting streaming audio processing")
+                
+                while (isRecording.get()) {
+                    val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
+                    if (read > 0) {
+                        // Calculate audio level for silence detection
+                        currentAudioLevel = calculateAudioLevel(buffer, read)
+                        
+                        // Add to buffer for processing
+                        for (i in 0 until read) {
+                            audioBuffer.add(buffer[i])
+                        }
+                        
+                        // Write to file for backup
+                        val byteBuffer = ByteArray(read * 2)
+                        for (i in 0 until read) {
+                            val sample = buffer[i]
+                            byteBuffer[i * 2] = (sample.toInt() and 0xff).toByte()
+                            byteBuffer[i * 2 + 1] = ((sample.toInt() shr 8) and 0xff).toByte()
+                        }
+                        fos.write(byteBuffer)
+                        
+                        // Check for voice activity
+                        if (currentAudioLevel > SILENCE_THRESHOLD) {
+                            lastVoiceDetectedTime = System.currentTimeMillis()
+                        }
+                        
+                        // Auto-stop detection: silence for too long
+                        val currentTime = System.currentTimeMillis()
+                        val silenceDuration = currentTime - lastVoiceDetectedTime
+                        val totalRecordingTime = currentTime - recordingStartTime
+                        
+                        if (silenceDuration > SILENCE_DURATION_MS && 
+                            totalRecordingTime > MIN_RECORDING_DURATION_MS) {
+                            Log.i("AURA_AUDIO", "Auto-stopping due to silence: ${silenceDuration}ms")
+                            break
+                        }
+                        
+                        // Process chunk if we have enough data
+                        if (audioBuffer.size >= chunkSizeInSamples) {
+                            processAudioChunk()
+                        }
+                        
+                    } else if (read < 0) {
+                        Log.w("AURA_AUDIO", "AudioRecord read error: $read")
+                        break
+                    }
+                    
+                    Thread.sleep(10) // Small delay to prevent CPU overload
+                }
+                
+                Log.i("AURA_AUDIO", "Streaming audio processing finished")
+                
+                // Process final chunk if any audio was recorded
+                if (audioBuffer.isNotEmpty()) {
+                    processFinalAudio()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("AURA_AUDIO", "Error in streaming audio processing", e)
+            isRecording.set(false)
+        }
+    }
+    
+    private fun calculateAudioLevel(buffer: ShortArray, length: Int): Int {
+        var sum = 0.0
+        for (i in 0 until length) {
+            sum += (buffer[i] * buffer[i]).toDouble()
+        }
+        return kotlin.math.sqrt(sum / length).toInt()
+    }
+    
+    private fun processAudioChunk() {
+        // For now, we'll accumulate chunks and process at the end
+        // In a full streaming implementation, you would send this chunk to STT
+        Log.d("AURA_AUDIO", "Processing audio chunk: ${audioBuffer.size} samples")
+    }
+    
+    private fun processFinalAudio() {
+        if (audioBuffer.isEmpty()) {
+            Log.w("AURA_AUDIO", "No audio data to process")
+            broadcastError("No audio captured")
+            return
+        }
+        
+        Log.i("AURA_AUDIO", "Processing final audio: ${audioBuffer.size} samples")
+        
+        // Convert accumulated buffer to WAV and transcribe
+        val wavFile = File(cacheDir, "final_recording.wav")
+        convertBufferToWav(audioBuffer.toShortArray(), wavFile)
+        transcribeAudioFile(wavFile)
+    }
+    
+    private fun convertBufferToWav(audioData: ShortArray, wavFile: File) {
+        try {
+            val totalAudioLen = audioData.size * 2L // 2 bytes per sample
+            val totalDataLen = totalAudioLen + 36
+            val sampleRate = SAMPLE_RATE
+            val channels = 1
+            val byteRate = 16 * sampleRate * channels / 8
+            
+            FileOutputStream(wavFile).use { fos ->
+                fos.write(createWavHeader(totalAudioLen, totalDataLen, sampleRate, channels, byteRate))
+                
+                // Write audio data
+                for (sample in audioData) {
+                    fos.write(sample.toInt() and 0xff)
+                    fos.write((sample.toInt() shr 8) and 0xff)
+                }
+            }
+            
+            Log.i("AURA_AUDIO", "Converted buffer to WAV: ${wavFile.length()} bytes")
+        } catch (e: Exception) {
+            Log.e("AURA_AUDIO", "Error converting buffer to WAV", e)
         }
     }
 

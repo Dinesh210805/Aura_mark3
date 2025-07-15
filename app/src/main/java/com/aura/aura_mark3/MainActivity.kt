@@ -83,8 +83,8 @@ class MainActivity : ComponentActivity() {
             ttsLanguage = prefs.getString("tts_language", "en") ?: "en"
             selectedVoice = prefs.getString("playai_voice", "Arista-PlayAI") ?: "Arista-PlayAI"
             ttsSpeed = prefs.getFloat("tts_speed", 1.2f)
-            statusMessage = "Initializing AURA voice assistant..."
-            conversationMode = true // Enable conversation mode by default
+            statusMessage = "🔄 Initializing AURA..."
+            conversationMode = true
         }
         
         // Initialize AIManager
@@ -206,29 +206,25 @@ class MainActivity : ComponentActivity() {
         val recordingStatus = voiceManager.getRecordingStatus()
         Log.i("AURA_VOICE", "Current state: $recordingStatus")
         
-        when {
-            // If AURA is speaking, force interrupt
-            voiceManager.isSpeaking -> {
-                Log.w("AURA_VOICE", "AURA is speaking - forcing interrupt")
-                voiceManager.resetSpeakingState()
-                return
-            }
-            
-            // If we can stop recording (manual or command recording active)
-            recordingStatus.canStopRecording -> {
-                Log.i("AURA_VOICE", "Stopping active recording")
-                voiceManager.stopManualRecording()
-            }
-            
-            // If we can start recording (idle or just listening for wake word)
-            recordingStatus.canStartRecording -> {
-                Log.i("AURA_VOICE", "Starting manual recording")
-                voiceManager.startManualRecording()
-            }
-            
-            // Any other state - log and inform user
-            else -> {
-                Log.w("AURA_VOICE", "Cannot change recording state in current condition: ${recordingStatus.state}")
+        runOnUiThread {
+            when {
+                // If we can stop recording (manual or command recording active)
+                recordingStatus.canStopRecording -> {
+                    Log.i("AURA_VOICE", "Stopping active recording")
+                    voiceManager.stopManualRecording()
+                }
+                
+                // If AURA is speaking or if we can start recording
+                recordingStatus.canStartRecording -> {
+                    Log.i("AURA_VOICE", "Starting manual recording")
+                    voiceManager.startManualRecording()
+                }
+                
+                // Any other state - inform user
+                else -> {
+                    Log.w("AURA_VOICE", "Cannot change recording state: ${recordingStatus.state}")
+                    Toast.makeText(this@MainActivity, recordingStatus.statusMessage, Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
