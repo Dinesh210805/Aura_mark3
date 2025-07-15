@@ -54,7 +54,9 @@ class EnhancedVoiceService : Service() {
         // Wake word detection parameters
         const val WAKE_WORD_TIMEOUT_MS = 5000L // 5 seconds to detect wake word
         const val VOICE_TIMEOUT_MS = 3000L     // 3 seconds of silence to stop recording
-        const val AUDIO_LEVEL_THRESHOLD = 2000 // Minimum audio level for voice detection
+        const val AUDIO_LEVEL_THRESHOLD = 8000 // Higher threshold to reduce false positives
+        const val VOICE_CONFIRMATION_FRAMES = 3 // Require multiple frames above threshold
+        const val NOISE_FLOOR = 1000 // Background noise level
         
         // Intent actions
         const val ACTION_WAKE_WORD_DETECTED = "com.aura.aura_mark3.WAKE_WORD_DETECTED"
@@ -78,6 +80,8 @@ class EnhancedVoiceService : Service() {
     private var currentAudioLevel = 0
     private var lastVoiceDetectedTime = 0L
     private var wakeWordDetectedTime = 0L
+    private var lastSttRequestTime = 0L
+    private val STT_REQUEST_COOLDOWN = 2000L // 2 seconds between STT requests
     
     private val audioBuffer = mutableListOf<Short>()
     private val maxBufferSize = SAMPLE_RATE * 10 // 10 seconds of audio
@@ -88,6 +92,11 @@ class EnhancedVoiceService : Service() {
     // Audio processing variables
     private var silenceCounter = 0
     private val maxSilenceFrames = (VOICE_TIMEOUT_MS / 100).toInt() // 100ms frames
+    private var voiceConfirmationCounter = 0
+    private var backgroundNoiseLevel = NOISE_FLOOR
+    private var adaptiveThreshold = AUDIO_LEVEL_THRESHOLD
+    private val recentAudioLevels = mutableListOf<Int>()
+    private val maxRecentLevels = 50 // Track last 50 audio levels for noise estimation
     
     override fun onCreate() {
         super.onCreate()
@@ -279,10 +288,42 @@ class EnhancedVoiceService : Service() {
         }
         return sqrt(sum / length).toInt()
     }
+    
+    private fun updateNoiseEstimation(audioLevel: Int) {
+        recentAudioLevels.add(audioLevel)
+        if (recentAudioLevels.size > maxRecentLevels) {
+            recentAudioLevels.removeAt(0)
+        }
+        
+        // Update background noise level (average of lowest 30% of recent levels)
+        if (recentAudioLevels.size >= 10) {
+            val sorted = recentAudioLevels.sorted()
+            val noiseCount = (sorted.size * 0.3).toInt()
+            backgroundNoiseLevel = sorted.take(noiseCount).average().toInt()
+            
+            // Adaptive threshold: noise level + margin
+            adaptiveThreshold = maxOf(AUDIO_LEVEL_THRESHOLD, backgroundNoiseLevel * 3)
+        }
+    }
+    
+    private fun isValidVoiceActivity(audioLevel: Int): Boolean {
+        updateNoiseEstimation(audioLevel)
+        
+        val isAboveThreshold = audioLevel > adaptiveThreshold
+        
+        if (isAboveThreshold) {
+            voiceConfirmationCounter++
+        } else {
+            voiceConfirmationCounter = 0
+        }
+        
+        // Require sustained voice activity to reduce false positives
+        return voiceConfirmationCounter >= VOICE_CONFIRMATION_FRAMES
+    }
 
     private fun processWakeWordDetection(buffer: ShortArray, length: Int, audioLevel: Int) {
-        if (audioLevel > AUDIO_LEVEL_THRESHOLD) {
-            // Voice detected, add to buffer
+        if (isValidVoiceActivity(audioLevel)) {
+            // Valid voice detected, add to buffer
             for (i in 0 until length) {
                 audioBuffer.add(buffer[i])
             }
@@ -294,23 +335,25 @@ class EnhancedVoiceService : Service() {
             
             lastVoiceDetectedTime = System.currentTimeMillis()
             
-            // Check if we have enough audio for wake word detection
-            if (audioBuffer.size >= SAMPLE_RATE * 2) { // 2 seconds of audio
+            // Check if we have enough audio for wake word detection (at least 2 seconds)
+            if (audioBuffer.size >= SAMPLE_RATE * 2) {
                 checkForWakeWord()
             }
         } else {
-            // Silence detected, check timeout
+            // Silence or noise detected, check timeout
             if (audioBuffer.isNotEmpty() && 
-                System.currentTimeMillis() - lastVoiceDetectedTime > 1000) {
-                // Clear buffer after 1 second of silence
+                System.currentTimeMillis() - lastVoiceDetectedTime > 2000) { // Increased to 2 seconds
+                // Clear buffer after silence
                 audioBuffer.clear()
+                voiceConfirmationCounter = 0
+                Log.d("EnhancedVoiceService", "Cleared audio buffer due to silence timeout")
             }
         }
     }
 
     private fun processCommandRecording(buffer: ShortArray, length: Int, audioLevel: Int) {
-        if (audioLevel > AUDIO_LEVEL_THRESHOLD) {
-            // Voice detected, add to buffer
+        if (isValidVoiceActivity(audioLevel)) {
+            // Valid voice detected, add to buffer
             for (i in 0 until length) {
                 audioBuffer.add(buffer[i])
             }
@@ -346,6 +389,14 @@ class EnhancedVoiceService : Service() {
 
     private fun transcribeForWakeWord(audioFile: File) {
         try {
+            // Rate limiting to prevent 429 errors
+            val currentTime = System.currentTimeMillis()
+            if (currentTime - lastSttRequestTime < STT_REQUEST_COOLDOWN) {
+                Log.d("EnhancedVoiceService", "STT request rate limited, skipping")
+                audioFile.delete()
+                return
+            }
+            lastSttRequestTime = currentTime
             val apiKey = loadApiKey()
             if (apiKey.isBlank()) {
                 Log.e("EnhancedVoiceService", "API key not found")
@@ -363,16 +414,30 @@ class EnhancedVoiceService : Service() {
                             val transcription = response.body()?.text?.lowercase() ?: ""
                             Log.i("EnhancedVoiceService", "Wake word check: $transcription")
                             
-                            // Check for wake words
+                            // Check for wake words with broader patterns
                             if (transcription.contains("hey aura") || 
                                 transcription.contains("aura") ||
                                 transcription.contains("hey ora") ||
-                                transcription.contains("hey aira")) {
+                                transcription.contains("hey aira") ||
+                                transcription.contains("hey there") ||
+                                transcription.contains("hey") ||
+                                transcription.contains("hello") ||
+                                transcription.length > 10) { // Any substantial speech
                                 
+                                Log.i("EnhancedVoiceService", "Wake word pattern detected: '$transcription'")
                                 onWakeWordDetected()
+                            } else {
+                                Log.d("EnhancedVoiceService", "No wake word in: '$transcription'")
                             }
                         } else {
-                            Log.e("EnhancedVoiceService", "STT failed: ${response.code()}")
+                            val errorCode = response.code()
+                            Log.e("EnhancedVoiceService", "STT failed: $errorCode")
+                            
+                            // Handle rate limiting gracefully
+                            if (errorCode == 429) {
+                                Log.w("EnhancedVoiceService", "Rate limited - will retry later")
+                                lastSttRequestTime = System.currentTimeMillis() + 5000L // Extra cooldown
+                            }
                         }
                         audioFile.delete()
                     }

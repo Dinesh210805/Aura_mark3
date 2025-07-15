@@ -38,9 +38,15 @@ class EventManager(
     private val actionResultReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val success = intent?.getBooleanExtra(EXTRA_ACTION_RESULT_SUCCESS, false) ?: false
-            val message = intent?.getStringExtra(EXTRA_ACTION_RESULT_MESSAGE) ?: "Unknown result"
-            Log.i("AURA_ACTION", "Action result: success=$success, message=$message")
-            voiceManager.statusMessage = if (success) "✅ $message" else "❌ $message"
+            val message = intent?.getStringExtra(EXTRA_ACTION_RESULT_MESSAGE)
+            
+            // Only show meaningful messages, ignore empty or default ones
+            if (!message.isNullOrBlank() && message != "Unknown result") {
+                Log.i("AURA_ACTION", "Action result: success=$success, message=$message")
+                voiceManager.statusMessage = if (success) "✅ $message" else "❌ $message"
+            } else {
+                Log.d("AURA_ACTION", "Ignoring empty action result message")
+            }
         }
     }
 

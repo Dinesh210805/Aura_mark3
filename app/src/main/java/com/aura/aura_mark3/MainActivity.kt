@@ -147,6 +147,8 @@ class MainActivity : ComponentActivity() {
                 } else {
                     Box(modifier = Modifier.fillMaxSize()) {
                         Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                            val recordingStatus = voiceManager.getRecordingStatus()
+                            
                             VoiceAssistantUI(
                                 modifier = Modifier.padding(innerPadding),
                                 isListening = eventManager.isListeningForWakeWord || eventManager.isRecordingCommand || voiceManager.isRecording,
@@ -160,14 +162,28 @@ class MainActivity : ComponentActivity() {
                                 userTranscription = aiManager.userTranscription,
                                 assistantSpeech = voiceManager.assistantSpeech,
                                 statusMessage = voiceManager.statusMessage,
+                                buttonText = recordingStatus.buttonText,
+                                canRecord = recordingStatus.canStartRecording || recordingStatus.canStopRecording,
                                 onManualRecord = { 
                                     Log.i("AURA_VOICE", "=== BUTTON CLICKED - onManualRecord callback triggered ===")
+                                    
+                                    val currentStatus = voiceManager.getRecordingStatus()
+                                    Log.d("AURA_STATE", "Current recording status: $currentStatus")
+                                    
                                     runOnUiThread {
-                                        if (voiceManager.isSpeaking) {
-                                            Toast.makeText(this@MainActivity, "Interrupting AURA...", Toast.LENGTH_SHORT).show()
-                                            voiceManager.resetSpeakingState()
-                                        } else {
-                                            Toast.makeText(this@MainActivity, "Starting recording...", Toast.LENGTH_SHORT).show()
+                                        when {
+                                            currentStatus.canStopRecording -> {
+                                                Toast.makeText(this@MainActivity, "Stopping recording...", Toast.LENGTH_SHORT).show()
+                                            }
+                                            currentStatus.canStartRecording -> {
+                                                Toast.makeText(this@MainActivity, "Starting recording...", Toast.LENGTH_SHORT).show()
+                                            }
+                                            voiceManager.isSpeaking -> {
+                                                Toast.makeText(this@MainActivity, "Interrupting AURA...", Toast.LENGTH_SHORT).show()
+                                            }
+                                            else -> {
+                                                Toast.makeText(this@MainActivity, currentStatus.statusMessage, Toast.LENGTH_SHORT).show()
+                                            }
                                         }
                                     }
                                     manualVoiceActivation()
@@ -182,37 +198,38 @@ class MainActivity : ComponentActivity() {
     }
     
     /**
-     * Manual voice activation - handles button press
+     * Manual voice activation - handles button press with proper state management
      */
     private fun manualVoiceActivation() {
         Log.i("AURA_VOICE", "=== MANUAL VOICE ACTIVATION TRIGGERED ===")
-        Log.i("AURA_VOICE", "Current state - isRecording: ${voiceManager.isRecording}, isSpeaking: ${voiceManager.isSpeaking}, conversationMode: ${voiceManager.conversationMode}")
         
-        if (voiceManager.isRecording) {
-            voiceManager.stopManualRecording()
-        } else {
-            // Check if AURA is speaking and allow force stop
-            if (voiceManager.isSpeaking) {
-                Log.w("AURA_VOICE", "AURA is speaking - forcing reset")
+        val recordingStatus = voiceManager.getRecordingStatus()
+        Log.i("AURA_VOICE", "Current state: $recordingStatus")
+        
+        when {
+            // If AURA is speaking, force interrupt
+            voiceManager.isSpeaking -> {
+                Log.w("AURA_VOICE", "AURA is speaking - forcing interrupt")
                 voiceManager.resetSpeakingState()
                 return
             }
             
-            // Check permissions first
-            val micPermission = isMicPermissionGranted()
-            Log.i("AURA_VOICE", "Microphone permission granted: $micPermission")
-            if (!micPermission) {
-                voiceManager.statusMessage = "Microphone permission required"
-                voiceManager.speakWithPlayAITts("Please grant microphone permission to use voice commands.")
-                return
+            // If we can stop recording (manual or command recording active)
+            recordingStatus.canStopRecording -> {
+                Log.i("AURA_VOICE", "Stopping active recording")
+                voiceManager.stopManualRecording()
             }
             
-            voiceManager.startManualRecording()
-        }
-        
-        // Ensure greeting has been given
-        if (!aiManager.hasGreeted && !voiceManager.isRecording) {
-            aiManager.hasGreeted = true
+            // If we can start recording (idle or just listening for wake word)
+            recordingStatus.canStartRecording -> {
+                Log.i("AURA_VOICE", "Starting manual recording")
+                voiceManager.startManualRecording()
+            }
+            
+            // Any other state - log and inform user
+            else -> {
+                Log.w("AURA_VOICE", "Cannot change recording state in current condition: ${recordingStatus.state}")
+            }
         }
     }
     
@@ -221,8 +238,14 @@ class MainActivity : ComponentActivity() {
      */
     private fun performInitialGreeting() {
         if (!aiManager.hasGreeted) {
-            voiceManager.statusMessage = "AURA is coming online..."
-            aiManager.greetUserWithCompoundBeta()
+            Log.i("AURA_GREETING", "Starting initial greeting...")
+            
+            // Use simple greeting for now to test basic functionality
+            voiceManager.statusMessage = "✨ Welcome to AURA!"
+            voiceManager.speakWithPlayAITts("Hello! I'm AURA, your voice assistant. I'm ready to help you! Say 'Hey there' or 'Hey Aura' to test wake word detection, or tap the microphone button.") {
+                voiceManager.statusMessage = "Ready! Say 'Hey there' or tap microphone"
+                aiManager.hasGreeted = true
+            }
         }
     }
     

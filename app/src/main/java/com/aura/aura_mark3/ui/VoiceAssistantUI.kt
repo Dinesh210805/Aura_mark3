@@ -44,15 +44,18 @@ import kotlin.math.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VoiceAssistantUI(
-    isListening: Boolean,
-    listeningType: String, // "wake_word", "command", "stopped"
-    audioLevel: Int,
-    userTranscription: String,
-    assistantSpeech: String,
-    statusMessage: String,
-    onManualRecord: () -> Unit,
-    onSettings: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isListening: Boolean = false,
+    listeningType: String = "stopped",
+    audioLevel: Int = 0,
+    userTranscription: String = "",
+    assistantSpeech: String = "",
+    statusMessage: String = "",
+    buttonText: String = "Tap to Talk",
+    canRecord: Boolean = true,
+    onManualRecord: () -> Unit = {},
+    onSettings: () -> Unit = {},
+    isTablet: Boolean = false
 ) {
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
@@ -145,7 +148,8 @@ fun VoiceAssistantUI(
 
         // Bottom controls
         BottomControls(
-            isListening = isListening,
+            buttonText = buttonText,
+            canRecord = canRecord,
             onManualRecord = onManualRecord,
             isTablet = isTablet
         )
@@ -446,7 +450,8 @@ private fun ConversationCard(
 
 @Composable
 private fun BottomControls(
-    isListening: Boolean,
+    buttonText: String,
+    canRecord: Boolean,
     onManualRecord: () -> Unit,
     isTablet: Boolean
 ) {
@@ -455,19 +460,19 @@ private fun BottomControls(
     
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Center
+        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
     ) {
-        // Manual record button
+        // Main voice button
         FilledTonalButton(
             onClick = { 
                 isPressed = true
                 onManualRecord()
-                // Reset pressed state after a short delay
                 coroutineScope.launch {
                     delay(200)
                     isPressed = false
                 }
             },
+            enabled = canRecord,
             modifier = Modifier
                 .height(if (isTablet) 56.dp else 48.dp)
                 .widthIn(min = if (isTablet) 200.dp else 160.dp)
@@ -475,25 +480,25 @@ private fun BottomControls(
             colors = ButtonDefaults.filledTonalButtonColors(
                 containerColor = when {
                     isPressed -> Color(0xFF00BCD4).copy(alpha = 0.5f)
-                    isListening -> Color(0xFFFF5722).copy(alpha = 0.3f) 
+                    buttonText.contains("Stop") -> Color(0xFFFF5722).copy(alpha = 0.3f) 
                     else -> Color(0xFF64FFDA).copy(alpha = 0.2f)
                 },
                 contentColor = when {
                     isPressed -> Color(0xFF00BCD4)
-                    isListening -> Color(0xFFFF5722) 
+                    buttonText.contains("Stop") -> Color(0xFFFF5722) 
                     else -> Color(0xFF64FFDA)
                 }
             ),
             shape = RoundedCornerShape(24.dp)
         ) {
             Icon(
-                imageVector = if (isListening) Icons.Default.Stop else Icons.Default.Mic,
-                contentDescription = if (isListening) "Stop recording" else "Start manual recording",
+                imageVector = if (buttonText.contains("Stop")) Icons.Default.Stop else Icons.Default.Mic,
+                contentDescription = buttonText,
                 modifier = Modifier.size(if (isTablet) 24.dp else 20.dp)
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = if (isListening) "Stop Recording" else "Tap to Talk",
+                text = buttonText,
                 fontSize = if (isTablet) 16.sp else 14.sp,
                 fontWeight = FontWeight.SemiBold
             )

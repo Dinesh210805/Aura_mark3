@@ -60,8 +60,10 @@ class AIManager(
         if (apiKey.isBlank()) {
             Log.w("AURA_LLM", "No API key found, using fallback greeting")
             voiceManager.statusMessage = "No API key found. Using fallback greeting."
-            voiceManager.speakWithPlayAITts("Hello, Joyboy! I'm AURA, your voice assistant. I'm excited to help you today! What would you like to do?") {
+            voiceManager.speakWithPlayAITts("Hello, Joyboy! I'm AURA, your voice assistant. I'm ready to help you today! Say 'Hey Aura' or tap the microphone to start!") {
                 isProcessingRequest = false
+                hasGreeted = true
+                voiceManager.statusMessage = "Ready for commands! Say 'Hey Aura' or tap microphone"
             }
             return
         }
@@ -102,8 +104,10 @@ class AIManager(
             
             override fun onFailure(call: Call<CompoundResponse>, t: Throwable) {
                 Log.e("AURA_LLM", "Compound Beta greeting failed", t)
-                voiceManager.statusMessage = "Greeting failed: ${t.localizedMessage}"
-                voiceManager.speakWithPlayAITts("Sorry, I couldn't generate a greeting right now. Please try again later.") {
+                voiceManager.statusMessage = "Using fallback greeting"
+                // Use a nice fallback greeting instead of apologizing
+                val fallbackGreeting = "Hello, Joyboy! I'm AURA, your amazing voice assistant! I'm ready to help you with device control, app management, web searches, and much more. Just say 'Hey Aura' or tap the microphone to get started!"
+                voiceManager.speakWithPlayAITts(fallbackGreeting) {
                     isProcessingRequest = false
                     voiceManager.statusMessage = "Ready for commands! Say 'Hey Aura' or tap microphone"
                 }
