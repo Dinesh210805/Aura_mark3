@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Any, Union, Type
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
+from dotenv import load_dotenv
 
 from .base import (
     BaseSTTProvider, BaseLLMProvider, BaseVLMProvider, BaseTTSProvider,
@@ -57,6 +58,9 @@ class ProviderRegistry:
     """
     
     def __init__(self):
+        # Load environment variables to ensure API keys are available
+        load_dotenv()
+        
         self.providers: Dict[str, Any] = {}
         self.service_configs: Dict[ServiceType, ServiceConfig] = {}
         self._initialize_providers()

@@ -1,0 +1,7 @@
+# AURA Agent Test GUI Requirements
+
+streamlit>=1.32.0
+requests>=2.31.0
+Pillow>=10.0.0
+soundfile>=0.12.1
+numpy>=1.24.0

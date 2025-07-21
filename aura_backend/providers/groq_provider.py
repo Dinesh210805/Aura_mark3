@@ -184,32 +184,56 @@ class GroqProvider(BaseSTTProvider, BaseLLMProvider, BaseVLMProvider, BaseTTSPro
         model: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
-        """Analyze intent using Groq LLM"""
+        """Analyze intent using optimized Groq LLM with specialized prompts"""
         if not self.is_available():
             raise ProviderUnavailableError("Groq API key not available", "groq")
         
+        # Import optimized analyzer
+        try:
+            from optimized_intent_analyzer import optimized_intent_analyzer
+            
+            # Use optimized analysis if available
+            result = await optimized_intent_analyzer.analyze_intent_optimized(
+                transcript=transcript,
+                ui_tree=ui_tree,
+                llm_service=self
+            )
+            
+            if not result.get("_fallback"):
+                return result
+            
+        except ImportError:
+            logger.warning("Optimized intent analyzer not available, using fallback")
+        except Exception as e:
+            logger.warning(f"Optimized analysis failed: {e}, using fallback")
+        
+        # Fallback to original implementation
         model = model or "llama-3.3-70b-versatile"
         
-        system_prompt = """You are AURA, an intelligent Android accessibility assistant. 
-        Analyze the user's voice command and determine:
-        1. The specific intent/goal
-        2. What UI elements need to be interacted with
-        3. The sequence of actions required
-        4. Whether screen analysis is needed
+        # Ultra-optimized system prompt for maximum speed
+        system_prompt = """AURA Android assistant. Analyze voice commands FAST.
 
-        Respond in JSON format:
-        {
-            "intent": "brief description of what user wants",
-            "target_elements": ["element1", "element2"],
-            "requires_screen_analysis": true/false,
-            "action_type": "tap|swipe|type|navigate|open_app|system_command",
-            "parameters": {"key": "value"},
-            "confidence": 0.0-1.0
-        }"""
+CATEGORIES & KEYWORDS:
+• Navigation: "open X", "go back/home", "switch to X" → action_type: "navigate|open_app"
+• UI Actions: "tap X", "scroll up/down", "type X", "swipe" → action_type: "tap|scroll|type|swipe"
+• System: "turn on wifi", "volume up", "settings" → action_type: "system_command"
+• Info: "what's on screen", "read this", "describe" → action_type: "read_screen"
+
+OUTPUT ONLY JSON (no explanations):
+{
+    "intent": "1-sentence description",
+    "action_type": "tap|swipe|type|navigate|open_app|system_command|read_screen",
+    "requires_screen_analysis": true,
+    "confidence": 0.8
+}
+
+BE PRECISE and FAST."""
         
-        user_prompt = f"User said: '{transcript}'"
+        user_prompt = f"Command: '{transcript}'"
         if ui_tree:
-            user_prompt += f"\n\nAvailable UI elements: {ui_tree[:2000]}..."
+            # Truncate UI tree more aggressively for speed
+            ui_summary = ui_tree[:800] + "..." if len(ui_tree) > 800 else ui_tree
+            user_prompt += f"\nUI: {ui_summary}"
         
         try:
             response = await self.chat_completion(
@@ -218,8 +242,8 @@ class GroqProvider(BaseSTTProvider, BaseLLMProvider, BaseVLMProvider, BaseTTSPro
                     {"role": "user", "content": user_prompt}
                 ],
                 model=model,
-                temperature=0.1,
-                max_tokens=1000,
+                temperature=0.0,  # Zero temperature for consistent fast results
+                max_tokens=200,   # Reduced for maximum speed
                 response_format={"type": "json_object"}
             )
             
@@ -227,15 +251,26 @@ class GroqProvider(BaseSTTProvider, BaseLLMProvider, BaseVLMProvider, BaseTTSPro
                 content = response["content"]
                 try:
                     intent_data = json.loads(content)
+                    
+                    # Ensure required fields
+                    if "confidence" not in intent_data:
+                        intent_data["confidence"] = 0.7
+                    if "requires_screen_analysis" not in intent_data:
+                        intent_data["requires_screen_analysis"] = True
+                    if "action_type" not in intent_data:
+                        intent_data["action_type"] = "tap"
+                    
                     logger.info(f"Groq LLM: Intent analyzed - {intent_data.get('intent', 'Unknown')}")
                     return intent_data
                 except json.JSONDecodeError:
                     logger.warning("Groq LLM: Failed to parse JSON response")
                     return {
-                        "intent": content,
+                        "intent": content[:100],
                         "requires_screen_analysis": True,
                         "action_type": "tap",
-                        "confidence": 0.5
+                        "confidence": 0.5,
+                        "target_elements": [],
+                        "parameters": {}
                     }
             else:
                 return {"error": response.get("error", "LLM request failed")}

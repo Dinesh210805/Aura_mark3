@@ -100,16 +100,31 @@ class GroqLLM:
         """Generate natural language response for user"""
         try:
             if success and action_plan:
-                if any(step.get("fallback") for step in action_plan):
-                    return f"I'll help you with that. {intent}"
+                # Check the intent type for more natural responses
+                intent_lower = intent.lower()
+                
+                if "greeting" in intent_lower:
+                    return "Hello! I'm AURA, your accessibility assistant. How can I help you today?"
+                elif "open" in intent_lower and "application" in intent_lower:
+                    return "I'll open that app for you right away!"
+                elif "time" in intent_lower:
+                    from datetime import datetime
+                    current_time = datetime.now().strftime("%I:%M %p")
+                    return f"The current time is {current_time}."
+                elif "screenshot" in intent_lower or "capture" in intent_lower:
+                    return "I'll take a screenshot for you."
+                elif "help" in intent_lower or "capability" in intent_lower:
+                    return "I can help you with opening apps, taking screenshots, reading UI elements, and interacting with your device. What would you like me to do?"
+                elif any(step.get("fallback") for step in action_plan):
+                    return f"I understand you want to {intent}. Let me help you with that."
                 else:
-                    return f"Executing your request: {intent}"
+                    return f"I'll help you with {intent}."
             else:
-                return "I'm sorry, I couldn't understand what you want me to do. Could you please try again?"
+                return "I'm sorry, I couldn't understand what you want me to do. Could you please try again? You can ask me to open apps, take screenshots, or help with UI interactions."
                 
         except Exception as e:
             logger.error(f"Response generation error: {str(e)}")
-            return "I encountered an issue processing your request."
+            return "I encountered an issue processing your request. Please try again."
 
 # Global instance
 groq_llm = GroqLLM()

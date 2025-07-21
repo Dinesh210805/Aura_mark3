@@ -94,19 +94,19 @@ class AutoModelSelector:
             "llm": {
                 TaskComplexity.SIMPLE: {
                     PerformanceMode.SPEED: ("groq", "llama-3.1-8b-instant"),
-                    PerformanceMode.BALANCED: ("gemini", "gemini-2.5-flash-lite"),
+                    PerformanceMode.BALANCED: ("gemini", "gemini-2.5-flash"),
                     PerformanceMode.QUALITY: ("gemini", "gemini-2.5-flash"),
-                    PerformanceMode.COST: ("gemini", "gemini-2.5-flash-lite")
+                    PerformanceMode.COST: ("groq", "llama-3.1-8b-instant")
                 },
                 TaskComplexity.MEDIUM: {
                     PerformanceMode.SPEED: ("gemini", "gemini-2.5-flash"),
                     PerformanceMode.BALANCED: ("gemini", "gemini-2.5-flash"),
                     PerformanceMode.QUALITY: ("groq", "llama-3.3-70b-versatile"),
-                    PerformanceMode.COST: ("gemini", "gemini-2.0-flash-lite")
+                    PerformanceMode.COST: ("gemini", "gemini-2.5-flash")
                 },
                 TaskComplexity.COMPLEX: {
-                    PerformanceMode.SPEED: ("gemini", "gemini-2.5-flash"),
-                    PerformanceMode.BALANCED: ("gemini", "gemini-2.5-pro"),
+                    PerformanceMode.SPEED: ("groq", "llama-3.3-70b-versatile"),
+                    PerformanceMode.BALANCED: ("groq", "llama-3.3-70b-versatile"),
                     PerformanceMode.QUALITY: ("gemini", "gemini-2.5-pro"),
                     PerformanceMode.COST: ("groq", "llama-3.3-70b-versatile")
                 }
@@ -118,25 +118,25 @@ class AutoModelSelector:
                     PerformanceMode.SPEED: ("gemini", "gemini-2.5-flash"),
                     PerformanceMode.BALANCED: ("gemini", "gemini-2.5-flash"),
                     PerformanceMode.QUALITY: ("groq", "llama-4-maverick-17b-128e-instruct"),
-                    PerformanceMode.COST: ("gemini", "gemini-2.0-flash-lite")
+                    PerformanceMode.COST: ("gemini", "gemini-2.5-flash")
                 },
                 TaskComplexity.MEDIUM: {
                     PerformanceMode.SPEED: ("gemini", "gemini-2.5-flash"),
                     PerformanceMode.BALANCED: ("groq", "llama-4-maverick-17b-128e-instruct"),
-                    PerformanceMode.QUALITY: ("gemini", "gemini-2.5-pro"),
-                    PerformanceMode.COST: ("gemini", "gemini-2.0-flash")
+                    PerformanceMode.QUALITY: ("groq", "llama-4-maverick-17b-128e-instruct"),
+                    PerformanceMode.COST: ("gemini", "gemini-2.5-flash")
                 },
                 TaskComplexity.COMPLEX: {
                     PerformanceMode.SPEED: ("gemini", "gemini-2.5-flash"),
-                    PerformanceMode.BALANCED: ("gemini", "gemini-2.5-pro"),
+                    PerformanceMode.BALANCED: ("groq", "llama-4-maverick-17b-128e-instruct"),
                     PerformanceMode.QUALITY: ("gemini", "gemini-2.5-pro"),
                     PerformanceMode.COST: ("groq", "llama-4-maverick-17b-128e-instruct")
                 },
                 TaskComplexity.MULTIMODAL: {
                     PerformanceMode.SPEED: ("gemini", "gemini-2.5-flash"),
-                    PerformanceMode.BALANCED: ("gemini", "gemini-2.5-pro"),
+                    PerformanceMode.BALANCED: ("groq", "llama-4-maverick-17b-128e-instruct"),
                     PerformanceMode.QUALITY: ("gemini", "gemini-2.5-pro"),
-                    PerformanceMode.COST: ("gemini", "gemini-2.0-flash")
+                    PerformanceMode.COST: ("gemini", "gemini-2.5-flash")
                 }
             },
             

@@ -136,26 +136,31 @@ class GeminiProvider(BaseLLMProvider, BaseVLMProvider):
         
         model = model or "gemini-1.5-flash"
         
-        system_prompt = """You are AURA, an intelligent Android accessibility assistant. 
-        Analyze the user's voice command and determine:
-        1. The specific intent/goal
-        2. What UI elements need to be interacted with
-        3. The sequence of actions required
-        4. Whether screen analysis is needed
+        system_prompt = """AURA Android assistant. Analyze voice commands FAST.
 
-        Respond in JSON format:
-        {
-            "intent": "brief description of what user wants",
-            "target_elements": ["element1", "element2"],
-            "requires_screen_analysis": true/false,
-            "action_type": "tap|swipe|type|navigate|open_app|system_command",
-            "parameters": {"key": "value"},
-            "confidence": 0.0-1.0
-        }"""
+TASK TYPES & KEYWORDS:
+• Navigation: "open X", "go back", "home", "switch to X" → "navigate|open_app"
+• Touch: "tap X", "click X", "press X" → "tap"
+• Input: "type X", "enter X", "input X" → "type"
+• Scroll: "scroll up/down", "swipe left/right" → "scroll|swipe"  
+• System: "wifi on/off", "volume up/down", "brightness", "settings" → "system_command"
+• Read: "what's on screen", "read this", "describe X" → "read_screen"
+
+OUTPUT THIS EXACT JSON (no explanations):
+{
+    "intent": "clear 1-sentence goal",
+    "action_type": "tap|swipe|type|scroll|navigate|open_app|system_command|read_screen",
+    "requires_screen_analysis": true,
+    "confidence": 0.8
+}
+
+BE ACCURATE and CONCISE."""
         
-        user_prompt = f"User said: '{transcript}'"
+        user_prompt = f"Command: '{transcript}'"
         if ui_tree:
-            user_prompt += f"\n\nAvailable UI elements: {ui_tree[:2000]}..."
+            # Truncate UI context more aggressively for speed while keeping essential info
+            ui_context = ui_tree[:800] + "..." if len(ui_tree) > 800 else ui_tree
+            user_prompt += f"\nUI Elements: {ui_context}"
         
         try:
             response = await self.chat_completion(
@@ -163,8 +168,8 @@ class GeminiProvider(BaseLLMProvider, BaseVLMProvider):
                     {"role": "user", "content": f"{system_prompt}\n\n{user_prompt}"}
                 ],
                 model=model,
-                temperature=0.1,
-                max_tokens=1000,
+                temperature=0.0,    # Zero temperature for consistent results
+                max_tokens=200,     # Reduced for faster response
                 **kwargs
             )
             
