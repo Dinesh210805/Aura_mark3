@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import com.aura.aura_mark3.managers.EnhancedAIManager
 import com.aura.aura_mark3.managers.VoiceManager
+import com.aura.aura_mark3.managers.SystemManager
 
 /**
  * AURA Backend Integration Helper
@@ -21,9 +22,11 @@ class AuraBackendIntegration {
         fun createEnhancedAIManager(
             context: Context,
             voiceManager: VoiceManager,
-            backendUrl: String = DEFAULT_BACKEND_URL
+            backendUrl: String = DEFAULT_BACKEND_URL,
+            systemManager: SystemManager? = null
         ): EnhancedAIManager {
-            return EnhancedAIManager(context, voiceManager, backendUrl)
+            val enhancedAI = EnhancedAIManager(context, voiceManager, backendUrl, systemManager)
+            return enhancedAI
         }
         
         /**
@@ -36,7 +39,7 @@ class AuraBackendIntegration {
         ) {
             val enhancedAI = EnhancedAIManager(
                 context, 
-                VoiceManager(context), // Temporary instance
+                VoiceManager(context, { "" }, { true }), // Dummy providers for health check
                 backendUrl
             )
             

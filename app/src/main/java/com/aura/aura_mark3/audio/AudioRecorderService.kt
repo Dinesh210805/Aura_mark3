@@ -16,20 +16,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import android.util.Log
-import com.aura.aura_mark3.ai.GroqSttApi
-import com.aura.aura_mark3.ai.SttResponse
-import com.aura.aura_mark3.ai.provideGroqSttApi
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.MultipartBody
-import okhttp3.RequestBody.Companion.asRequestBody
-import okhttp3.RequestBody.Companion.toRequestBody
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
-import android.speech.tts.TextToSpeech
-import java.util.*
-import android.os.Handler
-import android.os.Looper
 import com.aura.aura_mark3.utils.AudioFileUtils
 
 class AudioRecorderService : Service() {
@@ -472,50 +458,19 @@ class AudioRecorderService : Service() {
         
         // Save the audio file for backend processing
         saveAudioFileForBackend(wavFile)
-
-        val apiKey = loadApiKey()
-        val groqApi: GroqSttApi = provideGroqSttApi()
-
-        val requestFile = wavFile.asRequestBody("audio/wav".toMediaTypeOrNull())
-        val filePart = MultipartBody.Part.createFormData("file", wavFile.name, requestFile)
-        val modelPart = "whisper-large-v3".toRequestBody("text/plain".toMediaTypeOrNull())
-
-        val call = groqApi.transcribeAudio(
-            authHeader = apiKey,
-            file = filePart,
-            model = modelPart
-        )
-
-        call.enqueue(object : Callback<SttResponse> {
-            override fun onResponse(call: Call<SttResponse>, response: Response<SttResponse>) {
-                if (response.isSuccessful) {
-                    val transcription = response.body()?.text ?: ""
-                    Log.i("AURA_STT", "Transcription: $transcription")
-                    // Only broadcast, do not speak
-                    val intent = Intent(ACTION_TRANSCRIPTION).apply {
-                        putExtra(EXTRA_TRANSCRIPTION, transcription)
-                        setPackage(packageName)
-                    }
-                    sendBroadcast(intent)
-                } else {
-                    Log.e("AURA_STT", "Transcription failed: ${response.code()} ${response.message()}")
-                    val intent = Intent(ACTION_TRANSCRIPTION).apply {
-                        putExtra(EXTRA_TRANSCRIPTION, "Sorry, speech recognition failed with code ${response.code()}.")
-                        setPackage(packageName)
-                    }
-                    sendBroadcast(intent)
-                }
-            }
-
-            override fun onFailure(call: Call<SttResponse>, t: Throwable) {
-                Log.e("AURA_STT", "Transcription error", t)
-                val intent = Intent(ACTION_TRANSCRIPTION).apply {
-                    putExtra(EXTRA_TRANSCRIPTION, "Failed to connect to server. Please try again.")
-                    setPackage(packageName)
-                }
-                sendBroadcast(intent)
-            }
-        })
+        
+        // For now, return a placeholder transcription
+        // The backend will handle actual STT processing
+        val placeholderTranscription = "Audio saved for backend processing"
+        
+        Log.i("AURA_STT", "Audio saved: ${wavFile.length()} bytes")
+        
+        // Broadcast placeholder result
+        val intent = Intent(ACTION_TRANSCRIPTION).apply {
+            putExtra(EXTRA_TRANSCRIPTION, placeholderTranscription)
+            setPackage(packageName)
+        }
+        sendBroadcast(intent)
     }
     
     /**

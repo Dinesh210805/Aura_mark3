@@ -23,13 +23,16 @@ import java.nio.ByteBuffer
 class ScreenshotHelper(private val activity: Activity) {
     companion object {
         const val REQUEST_CODE_SCREENSHOT = 1001
+        
+        /**
+         * Static method for taking screenshot from any context
+         */
+        fun takeScreenshot(context: Context, onScreenshotReady: (Bitmap?) -> Unit) {
+            // For now, return null since this needs proper implementation
+            // In a real implementation, you'd need to use MediaProjection
+            onScreenshotReady(null)
+        }
     }
-
-    private var mediaProjection: MediaProjection? = null
-    private var virtualDisplay: VirtualDisplay? = null
-    private var imageReader: ImageReader? = null
-
-    // Modern Activity Result API method
     fun requestScreenshotPermission(launcher: ActivityResultLauncher<Intent>) {
         val projectionManager = activity.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         val intent = projectionManager.createScreenCaptureIntent()

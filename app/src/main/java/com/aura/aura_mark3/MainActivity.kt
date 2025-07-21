@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.aura.aura_mark3.managers.*
+import com.aura.aura_mark3.integration.AuraBackendIntegration
 import com.aura.aura_mark3.ui.SettingsScreen
 import com.aura.aura_mark3.ui.VoiceAssistantUI
 import com.aura.aura_mark3.ui.theme.Aura_mark3Theme
@@ -40,7 +41,7 @@ class MainActivity : ComponentActivity() {
     
     // Managers
     private lateinit var voiceManager: VoiceManager
-    private lateinit var aiManager: AIManager
+    private lateinit var aiManager: EnhancedAIManager
     private lateinit var systemManager: SystemManager
     private lateinit var eventManager: EventManager
     
@@ -87,11 +88,11 @@ class MainActivity : ComponentActivity() {
             conversationMode = true
         }
         
-        // Initialize AIManager
-        aiManager = AIManager(
+        // Initialize Enhanced AIManager with Backend Integration
+        aiManager = AuraBackendIntegration.createEnhancedAIManager(
             context = this,
-            apiKeyProvider = ::loadApiKey,
-            voiceManager = voiceManager
+            voiceManager = voiceManager,
+            backendUrl = "http://10.0.2.2:8000/" // Adjust if using real device
         )
         
         // Initialize SystemManager
@@ -100,6 +101,9 @@ class MainActivity : ComponentActivity() {
             voiceManager = voiceManager,
             screenshotHelper = screenshotHelper
         )
+        
+        // Connect SystemManager to EnhancedAIManager for action execution
+        aiManager.setSystemManager(systemManager)
         
         // Initialize EventManager
         eventManager = EventManager(
@@ -230,17 +234,28 @@ class MainActivity : ComponentActivity() {
     }
     
     /**
-     * LLM-powered initial greeting
+     * Enhanced initial greeting using backend
      */
     private fun performInitialGreeting() {
         if (!aiManager.hasGreeted) {
-            Log.i("AURA_GREETING", "Starting initial greeting...")
+            Log.i("AURA_GREETING", "Starting enhanced backend greeting...")
             
-            // Use simple greeting for now to test basic functionality
-            voiceManager.statusMessage = "✨ Welcome to AURA!"
-            voiceManager.speakWithPlayAITts("Hello! I'm AURA, your voice assistant. I'm ready to help you! Say 'Hey there' or 'Hey Aura' to test wake word detection, or tap the microphone button.") {
-                voiceManager.statusMessage = "Ready! Say 'Hey there' or tap microphone"
-                aiManager.hasGreeted = true
+            // Check backend health first
+            AuraBackendIntegration.checkBackendHealth(this) { isHealthy, message ->
+                runOnUiThread {
+                    if (isHealthy) {
+                        Log.i("AURA_BACKEND", "Backend operational, using intelligent greeting")
+                        aiManager.greetUserWithBackend()
+                    } else {
+                        Log.w("AURA_BACKEND", "Backend unavailable: $message")
+                        // Fallback to simple greeting
+                        voiceManager.statusMessage = "✨ Welcome to AURA!"
+                        voiceManager.speakWithPlayAITts("Hello! I'm AURA, your voice assistant. Backend is currently unavailable, but I'm still here to help! Say 'Hey there' or tap the microphone.") {
+                            voiceManager.statusMessage = "Ready! Backend offline - limited features"
+                            aiManager.hasGreeted = true
+                        }
+                    }
+                }
             }
         }
     }

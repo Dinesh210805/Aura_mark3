@@ -26,7 +26,8 @@ import java.util.*
 class EnhancedAIManager(
     private val context: Context,
     private val voiceManager: VoiceManager,
-    private val backendBaseUrl: String = "http://10.0.2.2:8000/"
+    private val backendBaseUrl: String = "http://10.0.2.2:8000/",
+    private var systemManager: SystemManager? = null
 ) {
     // UI State
     var isProcessingRequest by mutableStateOf(false)
@@ -196,7 +197,7 @@ class EnhancedAIManager(
         Log.i("AURA_BACKEND", "Processing with screenshot for: $command")
         
         // Take screenshot first
-        ScreenshotHelper.takeScreenshot(context) { bitmap ->
+        ScreenshotHelper.takeScreenshot(context) { bitmap: Bitmap? ->
             if (bitmap != null) {
                 // Save audio file (if available) and screenshot
                 val audioFile = getLastAudioFile() // You'll need to implement this
@@ -344,13 +345,24 @@ class EnhancedAIManager(
      * Execute Android actions
      */
     private fun executeAndroidActions(actions: List<AuraAction>) {
-        // This integrates with your existing SystemManager
-        // You can call systemManager.startActionQueue(actions) here
         Log.i("AURA_BACKEND", "Executing ${actions.size} Android actions")
         
-        actions.forEach { action ->
-            Log.d("AURA_BACKEND", "Action: ${action.action} - ${action.label}")
+        // Execute actions through SystemManager if available
+        systemManager?.let { sm ->
+            sm.startActionQueue(actions)
+        } ?: run {
+            Log.w("AURA_BACKEND", "SystemManager not available, logging actions only")
+            actions.forEach { action ->
+                Log.d("AURA_BACKEND", "Action: ${action.action} - ${action.label}")
+            }
         }
+    }
+    
+    /**
+     * Set system manager for action execution
+     */
+    fun setSystemManager(systemManager: SystemManager) {
+        this.systemManager = systemManager
     }
     
     /**

@@ -25,7 +25,7 @@ import com.aura.aura_mark3.audio.EnhancedVoiceService
 class EventManager(
     private val context: Context,
     private val voiceManager: VoiceManager,
-    private val aiManager: AIManager,
+    private val aiManager: EnhancedAIManager,
     private val systemManager: SystemManager
 ) {
     // Voice service states
@@ -67,11 +67,8 @@ class EventManager(
                 
                 if (filteredTranscription.isNotBlank()) {
                     aiManager.animateTyping(filteredTranscription) {
-                        aiManager.processVoiceCommand(filteredTranscription) { actions ->
-                            if (actions.isNotEmpty()) {
-                                systemManager.startActionQueue(actions)
-                            }
-                        }
+                        // EnhancedAIManager handles the full workflow internally
+                        aiManager.processVoiceCommandWithBackend(filteredTranscription)
                     }
                 } else {
                     Log.i("AURA_STT", "Transcription filtered out as AURA's own voice")
@@ -157,11 +154,8 @@ class EventManager(
                 val filteredTranscription = filterOutAuraVoice(transcription)
                 if (filteredTranscription.isNotBlank()) {
                     aiManager.animateTyping(filteredTranscription) {
-                        aiManager.processVoiceCommand(filteredTranscription) { actions ->
-                            if (actions.isNotEmpty()) {
-                                systemManager.startActionQueue(actions)
-                            }
-                        }
+                        // EnhancedAIManager handles the full workflow internally
+                        aiManager.processVoiceCommandWithBackend(filteredTranscription)
                     }
                 }
             }

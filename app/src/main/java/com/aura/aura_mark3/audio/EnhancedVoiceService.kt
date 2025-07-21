@@ -16,16 +16,6 @@ import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import com.aura.aura_mark3.ai.GroqSttApi
-import com.aura.aura_mark3.ai.SttResponse
-import com.aura.aura_mark3.ai.provideGroqSttApi
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.MultipartBody
-import okhttp3.RequestBody.Companion.asRequestBody
-import okhttp3.RequestBody.Companion.toRequestBody
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
@@ -90,7 +80,7 @@ class EnhancedVoiceService : Service() {
     private val maxBufferSize = SAMPLE_RATE * 10 // 10 seconds of audio
     
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val sttApi = provideGroqSttApi()
+    // Removed sttApi - using backend integration instead
     
     // Audio processing variables
     private var silenceCounter = 0
