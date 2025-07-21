@@ -1,0 +1,314 @@
+Agentic Tooling
+While LLMs excel at generating text, compound-beta takes the next step. It's an advanced AI system that is designed to solve problems by taking action and intelligently uses external tools - starting with web search and code execution - alongside the powerful Llama 4 models and Llama 3.3 70b model. This allows it access to real-time information and interaction with external environments, providing more accurate, up-to-date, and capable responses than an LLM alone.
+
+Available Agentic Tools
+Usage
+Executed Tools
+Search Settings
+Domain Filtering with Wildcards
+Search Settings Examples
+Use Cases
+Real-time Fact Checker
+Natural Language Calculator
+Code Debugging Assistant
+Chart Generation
+Available Agentic Tools
+There are two agentic tool systems available:
+
+compound-beta: supports multiple tool calls per request. This system is great for use cases that require multiple web searches or code executions per request.
+compound-beta-mini: supports a single tool call per request. This system is great for use cases that require a single web search or code execution per request. compound-beta-mini has an average of 3x lower latency than compound-beta.
+Both systems support the following tools:
+
+Web Search via Tavily
+Code Execution via E2B (only Python is currently supported)
+
+Custom user-provided tools are not supported at this time.
+
+Usage
+To use agentic tools, change the model parameter to either compound-beta or compound-beta-mini:
+
+Python
+TypeScript
+JavaScript
+curl
+Python
+
+from groq import Groq
+
+client = Groq()
+
+completion = client.chat.completions.create(
+messages=[
+{
+"role": "user",
+"content": "What is the current weather in Tokyo?",
+}
+], # Change model to compound-beta to use agentic tooling # model: "llama-3.3-70b-versatile",
+model="compound-beta",
+)
+
+print(completion.choices[0].message.content)
+
+# Print all tool calls
+
+# print(completion.choices[0].message.executed_tools)
+
+And that's it!
+
+When the API is called, it will intelligently decide when to use search or code execution to best answer the user's query. These tool calls are performed on the server side, so no additional setup is required on your part to use agentic tooling.
+
+In the above example, the API will use its build in web search tool to find the current weather in Tokyo. If you didn't use agentic tooling, you might have needed to add your own custom tools to make API requests to a weather service, then perform multiple API calls to Groq to get a final result. Instead, with agentic tooling, you can get a final result with a single API call.
+
+Executed Tools
+To view the tools (search or code execution) used automatically by the compound system, check the executed_tools field in the response:
+
+Python
+TypeScript
+JavaScript
+Python
+
+import os
+from groq import Groq
+
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
+response = client.chat.completions.create(
+model="compound-beta",
+messages=[
+{"role": "user", "content": "What did Groq release last week?"}
+]
+)
+
+# Log the tools that were used to generate the response
+
+print(response.choices[0].message.executed_tools)
+Search Settings
+Customize web search behavior by using the search_settings parameter. This parameter allows you to exclude specific domains from search results or restrict searches to only include specific domains. These parameters are supported for both compound-beta and compound-beta-mini.
+
+Parameter Type Description
+exclude_domains string[] List of domains to exclude when performing web searches. Supports wildcards (e.g., "_.com")
+include_domains string[] Restrict web searches to only search within these specified domains. Supports wildcards (e.g., "_.edu")
+Domain Filtering with Wildcards
+Both include_domains and exclude_domains support wildcard patterns using the \* character. This allows for flexible domain filtering:
+
+Use _.com to include/exclude all .com domains
+Use _.edu to include/exclude all educational institutions
+Use specific domains like example.com to include/exclude exact matches
+
+You can combine both parameters to create precise search scopes. For example:
+
+Include only .com domains while excluding specific sites
+Restrict searches to specific country domains
+Filter out entire categories of websites
+Search Settings Examples
+Exclude Domains
+Include Domains
+Wildcard Use
+shell
+
+curl "https://api.groq.com/openai/v1/chat/completions" \
+ -X POST \
+ -H "Content-Type: application/json" \
+ -H "Authorization: Bearer ${GROQ_API_KEY}" \
+ -d '{
+"messages": [
+{
+"role": "user",
+"content": "Tell me about the history of Bonsai trees in America"
+}
+],
+"model": "compound-beta-mini",
+"search_settings": {
+"exclude_domains": ["wikipedia.org"]
+}
+}'
+Use Cases
+Compound-beta excels at a wide range of use cases, particularly when real-time information is required.
+
+Real-time Fact Checker and News Agent
+Your application needs to answer questions or provide information that requires up-to-the-minute knowledge, such as:
+
+Latest news
+Current stock prices
+Recent events
+Weather updates
+Building and maintaining your own web scraping or search API integration is complex and time-consuming.
+
+Solution with Compound Beta
+Simply send the user's query to compound-beta. If the query requires current information beyond its training data, it will automatically trigger its built-in web search tool (powered by Tavily) to fetch relevant, live data before formulating the answer.
+
+Why It's Great
+Get access to real-time information instantly without writing any extra code for search integration
+Leverage Groq's speed for a real-time, responsive experience
+Code Example
+Python
+TypeScript
+JavaScript
+Python
+
+import os
+from groq import Groq
+
+# Ensure your GROQ_API_KEY is set as an environment variable
+
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
+user_query = "What were the main highlights from the latest Apple keynote event?"
+
+# Or: "What's the current weather in San Francisco?"
+
+# Or: "Summarize the latest developments in fusion energy research this week."
+
+chat_completion = client.chat.completions.create(
+messages=[
+{
+"role": "user",
+"content": user_query,
+}
+], # The _only_ change needed: Specify the compound model!
+model="compound-beta",
+)
+
+print(f"Query: {user_query}")
+print(f"Compound Beta Response:\n{chat_completion.choices[0].message.content}")
+
+# You might also inspect chat_completion.choices[0].message.executed_tools
+
+# if you want to see if/which tool was used, though it's not necessary.
+
+Natural Language Calculator and Code Extractor
+You want users to perform calculations, run simple data manipulations, or execute small code snippets using natural language commands within your application, without building a dedicated parser or execution environment.
+
+Solution with Compound Beta
+Frame the user's request as a task involving computation or code. compound-beta-mini can recognize these requests and use its secure code execution tool to compute the result.
+
+Why It's Great
+Effortlessly add computational capabilities
+Users can ask things like:
+"What's 15% of $540?"
+"Calculate the standard deviation of [10, 12, 11, 15, 13]"
+"Run this python code: print('Hello from Compound Beta!')"
+Code Example
+Python
+TypeScript
+JavaScript
+Python
+
+import os
+from groq import Groq
+
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
+# Example 1: Calculation
+
+computation_query = "Calculate the monthly payment for a $30,000 loan over 5 years at 6% annual interest."
+
+# Example 2: Simple code execution
+
+code_query = "What is the output of this Python code snippet: `data = {'a': 1, 'b': 2}; print(data.keys())`"
+
+# Choose one query to run
+
+selected_query = computation_query
+
+chat_completion = client.chat.completions.create(
+messages=[
+{
+"role": "system",
+"content": "You are a helpful assistant capable of performing calculations and executing simple code when asked.",
+},
+{
+"role": "user",
+"content": selected_query,
+}
+], # Use the compound model
+model="compound-beta-mini",
+)
+
+print(f"Query: {selected_query}")
+print(f"Compound Beta Response:\n{chat_completion.choices[0].message.content}")
+Code Debugging Assistant
+Developers often need quick help understanding error messages or testing small code fixes. Searching documentation or running snippets requires switching contexts.
+
+Solution with Compound Beta
+Users can paste an error message and ask for explanations or potential causes. Compound Beta Mini might use web search to find recent discussions or documentation about that specific error. Alternatively, users can provide a code snippet and ask "What's wrong with this code?" or "Will this Python code run: ...?". It can use code execution to test simple, self-contained snippets.
+
+Why It's Great
+Provides a unified interface for getting code help
+Potentially draws on live web data for new errors
+Executes code directly for validation
+Speeds up the debugging process
+Note: compound-beta-mini uses one tool per turn, so it might search OR execute, not both simultaneously in one response.
+
+Code Example
+Python
+TypeScript
+JavaScript
+Python
+
+import os
+from groq import Groq
+
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
+# Example 1: Error Explanation (might trigger search)
+
+debug_query_search = "I'm getting a 'Kubernetes CrashLoopBackOff' error on my pod. What are the common causes based on recent discussions?"
+
+# Example 2: Code Check (might trigger code execution)
+
+debug_query_exec = "Will this Python code raise an error? `import numpy as np; a = np.array([1,2]); b = np.array([3,4,5]); print(a+b)`"
+
+# Choose one query to run
+
+selected_query = debug_query_exec
+
+chat_completion = client.chat.completions.create(
+messages=[
+{
+"role": "system",
+"content": "You are a helpful coding assistant. You can explain errors, potentially searching for recent information, or check simple code snippets by executing them.",
+},
+{
+"role": "user",
+"content": selected_query,
+}
+], # Use the compound model
+model="compound-beta-mini",
+)
+
+print(f"Query: {selected_query}")
+print(f"Compound Beta Response:\n{chat_completion.choices[0].message.content}")
+Chart Generation
+Need to quickly create data visualizations from natural language descriptions? Compound Beta's code execution capabilities can help generate charts without writing visualization code directly.
+
+Solution with Compound Beta
+Describe the chart you want in natural language, and Compound Beta will generate and execute the appropriate Python visualization code. The model automatically parses your request, generates the visualization code using libraries like matplotlib or seaborn, and returns the chart.
+
+Why It's Great
+Generate charts from simple natural language descriptions
+Supports common chart types (scatter, line, bar, etc.)
+Handles all visualization code generation and execution
+Customize data points, labels, colors, and layouts as needed
+Usage and Results
+Scatter Plot
+Line Plot
+Bar Plot
+Pie Chart
+Box Plot
+Superchart
+shell
+
+curl -X POST https://api.groq.com/openai/v1/chat/completions \
+ -H "Authorization: Bearer $GROQ_API_KEY" \
+ -H "Content-Type: application/json" \
+ -d '{
+"model": "compound-beta",
+"messages": [
+{
+"role": "user",
+"content": "Create a scatter plot showing the relationship between market cap and daily trading volume for the top 5 tech companies (AAPL, MSFT, GOOGL, AMZN, META). Use current market data."
+}
+]
+}'
+Results

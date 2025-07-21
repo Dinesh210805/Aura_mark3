@@ -1,5 +1,22 @@
 # AURA Backend Agent
 
+## 🚀 What's New in AURA
+
+### Intelligent Auto Model Selection (Like Cursor & Perplexity)
+AURA now features **smart auto model selection** that analyzes your tasks and automatically chooses the best AI model for optimal performance, quality, and cost. No more manual model selection needed!
+
+**Key Features:**
+- 🧠 **Task Complexity Analysis**: Automatically detects simple vs complex tasks
+- ⚡ **Performance Modes**: Speed, Balanced, Quality, and Cost optimization
+- 💰 **Cost Intelligence**: Uses cheaper models for simple tasks, premium for complex
+- 🎯 **Specialized Detection**: Auto-selects coding, vision, reasoning, or translation models
+- 📊 **Latest Models**: Updated with Gemini 2.5 Pro, Flash, and Flash-Lite (July 2025)
+
+### Multi-Provider Support
+- **Groq**: Fast STT, LLM, VLM, TTS services
+- **Gemini**: Advanced reasoning with 2M+ token context windows
+- **Auto-Failover**: Seamless switching if providers are unavailable
+
 ## Setup Instructions
 
 ### 1. Install Dependencies
@@ -46,7 +63,25 @@ The server will start at `http://localhost:8000`
 - Interactive docs: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
 
+## 📚 Documentation
+
+- **[Auto Model Selection Guide](AUTO_MODEL_SELECTION_GUIDE.md)** - Complete guide to intelligent model selection
+- **[Multi-Provider Guide](MULTI_PROVIDER_GUIDE.md)** - Provider switching and model management
+- **[Auto Mode Guide](AUTO_MODE_GUIDE.md)** - Automated operation features
+
 ## Testing
+
+### Test Auto Model Selection
+```bash
+# Test intelligent model selection
+python test_auto_selection.py
+
+# Test multi-provider functionality  
+python test_multi_provider.py
+
+# Test automated operations
+python test_auto_mode.py
+```
 
 ### Using curl
 ```bash

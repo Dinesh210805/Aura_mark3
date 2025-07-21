@@ -1,10 +1,13 @@
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
+from langsmith import Client, traceable
+from langchain_core.tracers.langchain import LangChainTracer
 from typing import Dict, Any, Literal
 import logging
 import time
 import traceback
 import json
+import os
 
 from nodes import (
     stt_node, intent_node, ui_check_node, 
@@ -14,11 +17,39 @@ from nodes import (
 logger = logging.getLogger(__name__)
 
 class AuraGraph:
-    """LangGraph orchestrator for AURA voice assistant"""
+    """LangGraph orchestrator for AURA voice assistant with LangSmith tracing"""
     
     def __init__(self):
+        # Initialize LangSmith if configured
+        self._setup_langsmith()
         self.graph = self._build_graph()
-        logger.info("AURA Graph initialized with LangGraph orchestration")
+        logger.info("AURA Graph initialized with LangGraph orchestration and LangSmith tracing")
+        
+    def _setup_langsmith(self):
+        """Setup LangSmith tracing if API key is provided"""
+        try:
+            langsmith_key = os.getenv("LANGCHAIN_API_KEY")
+            if langsmith_key and langsmith_key != "your_langsmith_api_key_here":
+                # Set environment variables for automatic tracing FIRST
+                os.environ["LANGCHAIN_TRACING_V2"] = "true"
+                os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
+                os.environ["LANGCHAIN_API_KEY"] = langsmith_key
+                os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGCHAIN_PROJECT", "aura-agent-visualization")
+                
+                # Initialize client after setting environment
+                self.langsmith_client = Client(api_key=langsmith_key)
+                self.project_name = os.environ["LANGCHAIN_PROJECT"]
+                
+                logger.info(f"LangSmith tracing enabled for project: {self.project_name}")
+                logger.info("Environment variables set for automatic LangGraph tracing")
+            else:
+                logger.info("LangSmith API key not configured - tracing disabled")
+                self.langsmith_client = None
+                self.project_name = None
+        except Exception as e:
+            logger.warning(f"Failed to setup LangSmith: {e}")
+            self.langsmith_client = None
+            self.project_name = None
         
     def _build_graph(self):
         """Build the LangGraph workflow"""
@@ -62,7 +93,16 @@ class AuraGraph:
         # Add memory for conversation state
         memory = MemorySaver()
         
-        return workflow.compile(checkpointer=memory)
+        # Compile with memory and automatic LangSmith tracing
+        # The environment variables set in _setup_langsmith() enable automatic tracing
+        compiled_graph = workflow.compile(checkpointer=memory)
+        
+        if self.langsmith_client:
+            logger.info("Graph compiled with LangSmith automatic tracing enabled")
+        else:
+            logger.info("Graph compiled without LangSmith tracing")
+            
+        return compiled_graph
     
     def _route_after_ui_check(self, state: Dict[str, Any]) -> Literal["use_vlm", "has_action_plan", "error"]:
         """Determine next step after UI check"""
@@ -92,18 +132,36 @@ class AuraGraph:
         logger.info("🔀 Routing: Default path - using VLM")
         return "use_vlm"
     
+    @traceable(name="aura_graph_process")
     async def process(self, state: Dict[str, Any], session_id: str = "default") -> Dict[str, Any]:
         """Process a request through the LangGraph"""
         start_time = time.time()
         
+        # Ensure session_id is a valid UUID for LangGraph checkpointer
+        import uuid
+        try:
+            # Validate if it's already a valid UUID
+            uuid.UUID(session_id)
+            graph_session_id = session_id
+        except ValueError:
+            # Generate a valid UUID if the session_id is not UUID format
+            graph_session_id = str(uuid.uuid4())
+            logger.info(f"🔄 Generated UUID for graph session: {session_id} -> {graph_session_id}")
+        
         try:
             # Add processing metadata
             state["processing_start_time"] = start_time
-            state["session_id"] = session_id
+            state["session_id"] = session_id  # Keep original session_id in state
+            state["graph_session_id"] = graph_session_id  # Store UUID for graph
             state["node_execution_times"] = {}
             
-            # Configure session
-            config = {"configurable": {"thread_id": session_id}}
+            # Configure session for LangGraph checkpointer
+            config = {
+                "configurable": {"thread_id": graph_session_id},  # Use UUID for checkpointer
+            }
+            
+            # The LangSmith tracing is handled automatically via environment variables
+            # No need to manually add LangChainTracer as callback when LANGCHAIN_TRACING_V2=true
             
             logger.info(f"🚀 Graph: Starting processing for session {session_id}")
             logger.info(f"🚀 Graph: Initial state keys: {list(state.keys())}")
@@ -114,7 +172,7 @@ class AuraGraph:
                           if k not in ['_audio_bytes', '_screenshot_bytes']}
             logger.info(f"🚀 Graph: Initial state: {json.dumps(clean_state, indent=2)}")
             
-            # Execute the graph
+            # Execute the graph with tracing
             logger.info("🚀 Graph: Executing LangGraph workflow...")
             result = await self.graph.ainvoke(state, config=config)
             

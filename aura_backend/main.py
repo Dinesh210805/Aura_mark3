@@ -13,6 +13,8 @@ from dotenv import load_dotenv
 from models.request_models import ProcessResponse, ActionStep, ChatRequest, ChatResponse
 from aura_graph import aura_graph
 from utils.image_utils import validate_image, optimize_image, validate_audio, get_image_info
+from api.provider_routes import provider_router
+from api.langsmith_routes import langsmith_router
 
 # Load environment variables from multiple possible locations
 # Try multiple .env locations
@@ -62,6 +64,15 @@ async def lifespan(app: FastAPI):
     logger.info("🎤 Groq STT/LLM/VLM integration ready")
     logger.info("🔊 PlayAI TTS via Groq integration ready")
     
+    # Setup LangSmith environment variables early
+    langsmith_key = os.getenv("LANGCHAIN_API_KEY")
+    if langsmith_key and langsmith_key != "your_langsmith_api_key_here":
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
+        os.environ["LANGCHAIN_API_KEY"] = langsmith_key
+        os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGCHAIN_PROJECT", "aura-agent-visualization")
+        logger.info("🔍 LangSmith tracing enabled at startup")
+    
     # Verify environment on startup
     try:
         await verify_environment()
@@ -92,6 +103,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include provider management routes
+app.include_router(provider_router)
+
+# Include LangSmith visualization routes
+app.include_router(langsmith_router)
 
 @app.get("/")
 async def root():
@@ -133,6 +150,16 @@ async def process_request(
     screenshot: Optional[UploadFile] = File(None),
     ui_tree: Optional[str] = Form(None),
     session_id: Optional[str] = Form(None),
+    # New provider/model selection parameters
+    stt_provider: Optional[str] = Form(None),
+    stt_model: Optional[str] = Form(None),
+    llm_provider: Optional[str] = Form(None),
+    llm_model: Optional[str] = Form(None),
+    vlm_provider: Optional[str] = Form(None),
+    vlm_model: Optional[str] = Form(None),
+    tts_provider: Optional[str] = Form(None),
+    tts_model: Optional[str] = Form(None),
+    tts_voice: Optional[str] = Form(None),
     _env_check: None = Depends(verify_environment)
 ):
     """Main endpoint to process voice commands with optional screenshot and UI tree"""
@@ -176,7 +203,14 @@ async def process_request(
             "has_audio": bool(audio_data),
             "has_screenshot": bool(screenshot_data),
             "audio_size": len(audio_data) if audio_data else 0,
-            "screenshot_size": len(screenshot_data) if screenshot_data else 0
+            "screenshot_size": len(screenshot_data) if screenshot_data else 0,
+            # Provider/model preferences
+            "provider_preferences": {
+                "stt": {"provider": stt_provider, "model": stt_model},
+                "llm": {"provider": llm_provider, "model": llm_model},
+                "vlm": {"provider": vlm_provider, "model": vlm_model},
+                "tts": {"provider": tts_provider, "model": tts_model, "voice": tts_voice}
+            }
         }
         
         # Store bytes data separately for node access
@@ -243,17 +277,34 @@ async def process_request(
 @app.post("/chat", response_model=ChatResponse)
 async def chat_only(
     request: ChatRequest,
+    # New provider/model selection parameters for chat
+    llm_provider: Optional[str] = None,
+    llm_model: Optional[str] = None,
     _env_check: None = Depends(verify_environment)
 ):
     """Text-only chat endpoint for testing without audio"""
     
-    session_id = request.session_id or str(uuid.uuid4())
+    # Ensure we have a valid UUID session_id
+    session_id = request.session_id
+    if not session_id:
+        session_id = str(uuid.uuid4())
+    else:
+        # Validate and convert to UUID if needed
+        try:
+            uuid.UUID(session_id)
+        except ValueError:
+            logger.info(f"Converting non-UUID session_id to UUID: {session_id}")
+            session_id = str(uuid.uuid4())
     
     try:
         # Build state with pre-transcribed text
         state = {
             "transcript": request.text,
-            "session_id": session_id
+            "session_id": session_id,
+            # Provider preferences for chat
+            "provider_preferences": {
+                "llm": {"provider": llm_provider, "model": llm_model}
+            }
         }
         
         # Process through LangGraph (skip STT node)

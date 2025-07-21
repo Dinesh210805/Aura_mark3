@@ -1,5 +1,6 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional, List, Dict, Any
+import uuid
 
 class ProcessRequest(BaseModel):
     """Request model for voice processing"""
@@ -43,6 +44,19 @@ class ChatRequest(BaseModel):
     """Text-only chat request"""
     text: str
     session_id: Optional[str] = None
+    
+    @field_validator('session_id')
+    @classmethod
+    def validate_session_id(cls, v):
+        if v is None:
+            return str(uuid.uuid4())
+        # If it's not a valid UUID, generate a new one
+        try:
+            uuid.UUID(v)
+            return v
+        except ValueError:
+            # Convert non-UUID strings to UUID format
+            return str(uuid.uuid4())
 
 class ChatResponse(BaseModel):
     """Text-only chat response"""
